@@ -1,0 +1,21 @@
+services:
+  db:
+    image: postgres:16
+    container_name: automoder-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: automoder
+      POSTGRES_PASSWORD: automoder
+      POSTGRES_DB: automoder
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U automoder -d automoder"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:
