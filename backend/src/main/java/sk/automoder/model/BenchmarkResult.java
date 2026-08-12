@@ -48,6 +48,10 @@ public class BenchmarkResult {
     @Column(name = "error_count", nullable = false)
     private int errorCount;
 
+    /** Number of samples already classified (progress indicator, updated incrementally). */
+    @Column(name = "processed_samples")
+    private Integer processedSamples;
+
     // ---------- getters & setters ----------
 
     public Long getId() {
@@ -136,5 +140,13 @@ public class BenchmarkResult {
 
     public void setErrorCount(int errorCount) {
         this.errorCount = errorCount;
+    }
+
+    public Integer getProcessedSamples() {
+        return processedSamples;
+    }
+
+    public void setProcessedSamples(Integer processedSamples) {
+        this.processedSamples = processedSamples;
     }
 }

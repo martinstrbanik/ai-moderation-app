@@ -99,12 +99,15 @@ Kľúčové princípy:
 
 ### 4.5 Benchmark modul (`/benchmarks`)
 - **Datasety:** používame dostupné / existujúce datasety (napr. toxicity detekcia, hate speech atď.) — **vlastné datasety netvoríme**. Užívateľ si vyberá z pripravených datasetov; import vlastného datasetu (CSV/JSON s obsahom a očakávaným označením `label`) je voliteľné rozšírenie.
-- **Benchmark run:** vybraný dataset × vybrané modely × vybrané politiky → systém spustí moderáciu na vzorke a uloží výsledky.
+- **Benchmark run:** vybraný dataset × vybrané modely × vybraný level → systém spustí klasifikáciu na vzorke a uloží výsledky.
+- **Politika v benchmarku (ideový zápis):** v súčasnosti je politika **voliteľná** a slúži len ako **referenčné metadáta** behu (evidencia, meno v odpovedi) – samotná klasifikácia prebieha **priamo do labelov datasetu**, nezávisle od pravidiel politiky. Vďaka tomu sa modely porovnávajú férovo (rovnaký prompt pre všetky modely). **Nápad do budúcna:** pridať režim, kde by prompt obsahoval kategórie/akciu/prah politiky a model by vracal verdikt (ALLOW/FLAG/BLOCK) mapovaný na label – hodnotenie moderácie „podľa politiky“ end-to-end.
 - **Velkosť behu (levely):** kvôli šetreniu tokenov sú preddefinované úrovne, ktoré určujú počet vzoriek spracovaných v jednom behu:
   - `EXTRA_LIGHT` — malá vzorka (rýchly orientačný test),
   - `LIGHT` — stredná vzorka (štandardný beh),
   - (prípadne `FULL` — celý dataset).
 - **Metriky:** precision, recall, F1-score, accuracy + latencia (ms), náklady, počet zlyhaní.
+- **Dávkové spracovanie (batching):** vzorky sa posielajú modelu v dávkach – default `automoder.benchmark.batch-size` (10), **voliteľne sa dá nastaviť per-beh** cez `batchSize` v requeste. Menej HTTP volaní a menej opakovaného system promptu → rýchlejšie aj lacnejšie behy. Ak model vráti nečitateľnú odpoveď dávky, systém automaticky **prepadne na jednotlivé volania** (fallback).
+- **⚠️ Metodologické upozornenie (batch size a výsledky):** veľkosť dávky môže ovplyvniť výsledky benchmarku, nielen rýchlosť – model vidí texty dávky naraz, čo môže viesť k **kontextovým efektom** (priming/anchoring), **label-prior bias** (hlavne pri nevyvážených dátach / `FULL` behoch) a **position bias** (poradie textov v dávke). Pre férové porovnanie modelov **používaj rovnaký batch size pre všetky behy** a deklaruj ho v metodike; odporúča sa aj malý senzitivitný experiment (napr. batch 1/5/10/20), ktorý overí, či sa metriky nemenia.
 - **Porovnanie:** tabuľkový a grafický výstup, export do CSV.
 
 ### 4.6 (Nápad) Slovenský dataset – porovnanie jazykov (ENG vs SK)
@@ -153,7 +156,7 @@ GET/POST/PUT/DELETE  /api/policies
 POST  /api/moderation        { policyId, text?, image? }  -> { verdict, categories, ... }
 GET   /api/moderation/logs   (filtrovateľné)
 POST  /api/datasets          (import datasetu)
-POST  /api/benchmarks/runs   { datasetId, policyId, modelIds[] }
+POST  /api/benchmarks/runs   { datasetId, policyId?, modelIds[], level, batchSize? }
 GET   /api/benchmarks/runs/{id}
 GET   /api/benchmarks/results
 GET   /api/dashboard/summary

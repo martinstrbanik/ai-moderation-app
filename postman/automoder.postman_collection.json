@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "a1b2c3d4-a1b2-4c3d-8e9f-0a1b2c3d4e5f",
     "name": "AutoModer API",
-    "description": "Collection of REST API endpoints for AutoModer (milestone 2 - Core entities + CRUD).\n\nAuth: HTTP Basic (admin / admin123).\nBase URL: variable {{baseUrl}} (default http://localhost:8080).",
+    "description": "Collection of REST API endpoints for AutoModer (milestone 3/4 - Core entities + CRUD + benchmark).\n\nAuth: HTTP Basic (admin / admin123).\nBase URL: variable {{baseUrl}} (default http://localhost:8080).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -38,6 +38,16 @@
     },
     {
       "key": "keyId",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "datasetId",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "runId",
       "value": "1",
       "type": "string"
     }
@@ -404,6 +414,135 @@
                 "api",
                 "api-keys",
                 "{{keyId}}"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Datasets /api/datasets",
+      "item": [
+        {
+          "name": "List datasets",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/datasets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "datasets"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get dataset",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/datasets/{{datasetId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "datasets",
+                "{{datasetId}}"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Benchmarks /api/benchmarks",
+      "item": [
+        {
+          "name": "List benchmark runs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/benchmarks/runs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "benchmarks",
+                "runs"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create benchmark run",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/benchmarks/runs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "benchmarks",
+                "runs"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"datasetId\": 1,\n    \"policyId\": 1,\n    \"modelIds\": [3],\n    \"level\": \"EXTRA_LIGHT\",\n    \"apiKeyId\": 1,\n    \"batchSize\": 10\n}"
+            }
+          }
+        },
+        {
+          "name": "Get benchmark run",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/benchmarks/runs/{{runId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "benchmarks",
+                "runs",
+                "{{runId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get benchmark results",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/benchmarks/runs/{{runId}}/results",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "benchmarks",
+                "runs",
+                "{{runId}}",
+                "results"
               ]
             }
           }

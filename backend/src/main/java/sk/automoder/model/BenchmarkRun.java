@@ -36,9 +36,17 @@ public class BenchmarkRun {
     @JoinColumn(name = "policy_id")
     private Policy policy;
 
+    /** FK to the BYO API key used for this run (optional - falls back to the first key). */
+    @Column(name = "api_key_id")
+    private Long apiKeyId;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 16)
     private BenchmarkLevel level;
+
+    /** Optional per-run batch size (overrides the global default). */
+    @Column(name = "batch_size")
+    private Integer batchSize;
 
     @Column(nullable = false)
     private boolean published;
@@ -87,12 +95,28 @@ public class BenchmarkRun {
         this.policy = policy;
     }
 
+    public Long getApiKeyId() {
+        return apiKeyId;
+    }
+
+    public void setApiKeyId(Long apiKeyId) {
+        this.apiKeyId = apiKeyId;
+    }
+
     public BenchmarkLevel getLevel() {
         return level;
     }
 
     public void setLevel(BenchmarkLevel level) {
         this.level = level;
+    }
+
+    public Integer getBatchSize() {
+        return batchSize;
+    }
+
+    public void setBatchSize(Integer batchSize) {
+        this.batchSize = batchSize;
     }
 
     public boolean isPublished() {
