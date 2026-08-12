@@ -10,6 +10,10 @@ target/
 *.jar
 !.mvn/wrapper/maven-wrapper.jar
 
+# ----- Python -----
+__pycache__/
+*.pyc
+
 # ----- Node / Vue -----
 node_modules/
 dist/

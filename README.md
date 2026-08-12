@@ -107,7 +107,20 @@ Kľúčové princípy:
 - **Metriky:** precision, recall, F1-score, accuracy + latencia (ms), náklady, počet zlyhaní.
 - **Porovnanie:** tabuľkový a grafický výstup, export do CSV.
 
-### 4.6 Predpripravené benchmark výsledky (`/benchmarks/published`)
+### 4.6 (Nápad) Slovenský dataset – porovnanie jazykov (ENG vs SK)
+
+- Okrem anglických datasetov (napr. Davidson, Jigsaw) zvážiť aj **benchmark na slovenskom datasete** – teda porovnať, ako dobre AI modely detegujú hate/toxický obsah v **angličtine vs slovenčine**.
+- **Prínos pre prácu:** jazykové porovnanie modelov je originálny a prakticky využiteľný rozmer. Mnohé modely sú primárne trénované na angličtine, takže môže byť hodnotné ukázať rozdiely v precision/recall/F1 a robustnosť na slovenských dátach (skloňovanie, diakritika, slang).
+- **Nájdené slovenské datasety (Hugging Face) – binárna hate-speech klasifikácia (label 0/1):**
+  - [`TUKE-KEMT/hate_speech_slovak`](https://huggingface.co/datasets/TUKE-KEMT/hate_speech_slovak) – stĺpce `id`, `text`, `label`; train 11 870 / test 1 319 (spolu 13 189).
+  - [`mteb/slovak_hate_speech`](https://huggingface.co/datasets/mteb/slovak_hate_speech) – MTEB verzia, stĺpce `id`, `text`, `label`; train 11 301 / test 1 237 (spolu 12 538).
+  - [`mteb/SlovakHateSpeechClassification`](https://huggingface.co/datasets/mteb/SlovakHateSpeechClassification) – stĺpce `text`, `label`; train 11 870 / test 1 319 (bez `id`).
+  - Pozn.: `TUKE-KEMT/hate_speech_slovak` a `mteb/SlovakHateSpeechClassification` sú v podstate **ten istý korpus** (rovnaké počty, iné balenie); `mteb/slovak_hate_speech` je mierne odlišná (redukovaná) verzia.
+- **Výber pre benchmark:** primárne `TUKE-KEMT/hate_speech_slovak` (natívny zdroj, má `id`, JSON). Pre menšie behy (extra light/light) stačí vybrať **vyváženú podvzorku** rovnako ako pri Davidsonovi.
+- **Etika / citlivosť:** dataset obsahuje reálne slovenské komentáre vrátane **vulgárností a prejavov nenávisti**. Pri publikovaní výsledkov v práci treba dáta vhodne anonymizovať a uviesť účel (výskum moderácie), aby sa obsah ďalej nešíril.
+- **Implementačne:** benchmark modul sa nemení – nový `Dataset` so slovenským zdrojom sa formátovo hodí na existujúci `DatasetSample(content, expected_label)`; jazykové behy porovnáme v dashboarde (napr. metriky podľa jazyka).
+
+### 4.7 Predpripravené benchmark výsledky (`/benchmarks/published`)
 - Ukladajú sa tu vzorové výsledky benchmarkov **vybraných modelov, ktoré spustíme my (autori práce)** na pripravených datasetoch.
 - Slúžia ako referenčné dáta pre čitateľov práce aj pre používateľov — vidia porovnanie modelov bez nutnosti minúť tokeny.
 - Sú to teda niekoľké predpripravené výsledky, ale užívateľ si môže kedykoľvek spustiť **vlastný benchmark** (sekcia 4.5) a porovnať ho s nimi.
