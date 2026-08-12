@@ -15,7 +15,7 @@
     <artifactId>automoder</artifactId>
     <version>0.0.1-SNAPSHOT</version>
     <name>automoder</name>
-    <description>Automatizovaná moderácia používateľského obsahu pomocou AI modelov</description>
+    <description>Automated moderation of user content using AI models</description>
 
     <properties>
         <java.version>21</java.version>

@@ -70,8 +70,11 @@ Kľúčové princípy:
 ## 4. Funkčné moduly (feature set)
 
 ### 4.1 Správa modelov (`/models`)
-- CRUD nad registrovanými modelmi (napr. `google/gemini-2.0-flash`, `anthropic/claude-3.5-sonnet`, `openai/gpt-4o`).
-- Konfigurácia parametrov: max_tokens, temperature, timeout, cena za token.
+- CRUD nad registrovanými modelmi (referenčný katalóg; napr. `google/gemini-2.0-flash`, `anthropic/claude-3.5-sonnet`, `openai/gpt-4o`) — iba identifikátor (`model_id`), meno, typ a `enabled`.
+- **Parametre modelu nezdržiavame v DB** (sedí to na BYO štruktúru):
+  - `max_tokens`, `temperature` → **fixné nastavenia** aplikácie pri volaní na OpenRouter (deterministická moderácia: `temperature=0`, JSON výstup). Pevné parametre tiež zaručujú **porovnateľnosť v benchmarku** — všetky modely bežia na rovnakých nastaveniach.
+  - `timeout` → konfigurácia HTTP klienta (application.properties), nie atribút modelu.
+  - `cena za token` → neukladá sa; **skutočné náklady vráti OpenRouter** v odpovedi (`usage.cost`), z čoho benchmark počíta cenu presne.
 - Možnosť označiť model ako „textový“ / „vision“ (multimodálny).
 
 ### 4.2 Politiky moderácie (`/policies`)
@@ -114,7 +117,7 @@ Kľúčové princípy:
 Hlavné entity majú `tenant_id` kvôli budúcej izolácii (dnes single-tenant). Modely a datasety sú referenčné/seed dáta (spoločné, bez `tenant_id`):
 
 ```
-AiModel    (id, provider, model_id, name, type[text|vision], params, enabled)
+AiModel    (id, provider[openrouter], model_id, name, type[text|vision], enabled)
 ApiKey     (id, tenant_id, provider, encrypted_key, label)   // BYO OpenRouter klúč
 Policy     (id, tenant_id, name, description, rules, categories, threshold, model_id,
             fallback_model_id, action, active, version)
@@ -170,3 +173,7 @@ GET   /api/dashboard/summary
 - Export reportov do PDF/CSV.
 - Podpora vlastných (open-source) modelov (napr. lokálne Ollama) pre porovnanie.
 - Cache a rate-limiting voči providerom.
+
+
+## Zbehnutie appky
+`mvn spring-boot:run` v `backend/`
