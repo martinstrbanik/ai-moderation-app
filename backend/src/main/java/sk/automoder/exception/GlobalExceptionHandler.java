@@ -6,6 +6,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import sk.automoder.ai.AiProviderException;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -17,6 +18,12 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiError> handleApi(ApiException ex, HttpServletRequest request) {
         ApiError error = ApiError.of(ex.getStatus(), ex.getMessage(), request.getRequestURI());
         return ResponseEntity.status(ex.getStatus()).body(error);
+    }
+
+    @ExceptionHandler(AiProviderException.class)
+    public ResponseEntity<ApiError> handleAi(AiProviderException ex, HttpServletRequest request) {
+        ApiError error = ApiError.of(HttpStatus.BAD_GATEWAY, ex.getMessage(), request.getRequestURI());
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(error);
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

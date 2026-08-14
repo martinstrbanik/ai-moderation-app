@@ -4,6 +4,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import sk.automoder.dto.ApiKeyRequest;
 import sk.automoder.dto.ApiKeyResponse;
+import sk.automoder.exception.BadRequestException;
 import sk.automoder.exception.NotFoundException;
 import sk.automoder.model.ApiKey;
 import sk.automoder.repository.ApiKeyRepository;
@@ -54,6 +55,17 @@ public class ApiKeyService {
     private ApiKey requireKey(Long id) {
         return repository.findById(id)
                 .orElseThrow(() -> NotFoundException.of("API key", id));
+    }
+
+    /**
+     * Returns the plaintext of the first/default BYO OpenRouter key for the tenant.
+     * Throws BadRequestException if no key exists.
+     */
+    public String resolveDefaultPlainKey() {
+        ApiKey key = repository.findByTenantId(PolicyService.DEFAULT_TENANT).stream()
+                .findFirst()
+                .orElseThrow(() -> new BadRequestException("No OpenRouter API key configured."));
+        return encryptor.decrypt(key.getEncryptedKey());
     }
 
     private String mask(ApiKey apiKey) {

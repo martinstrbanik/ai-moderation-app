@@ -76,6 +76,37 @@
       ]
     },
     {
+      "name": "Moderation /api/moderation",
+      "item": [
+        {
+          "name": "Moderate text",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/moderation",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "moderation"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"policyId\": 2,\n    \"text\": \"Your text to moderate...\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "Models /api/models",
       "item": [
         {

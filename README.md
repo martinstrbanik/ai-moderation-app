@@ -153,7 +153,7 @@ BenchmarkResult(id, tenant_id, run_id, model_id, precision, recall, f1, accuracy
 GET/POST/PUT/DELETE  /api/models
 POST/PUT            /api/api-keys      (BYO OpenRouter kľúč, šifrovaný na strane servera)
 GET/POST/PUT/DELETE  /api/policies
-POST  /api/moderation        { policyId, text?, image? }  -> { verdict, categories, ... }
+POST  /api/moderation        { policyId, text } -> { verdict, severity, risk, categories, reason, ... }
 GET   /api/moderation/logs   (filtrovateľné)
 POST  /api/datasets          (import datasetu)
 POST  /api/benchmarks/runs   { datasetId, policyId?, modelIds[], level, batchSize? }

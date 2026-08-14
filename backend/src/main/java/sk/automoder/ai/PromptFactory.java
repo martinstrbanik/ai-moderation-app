@@ -32,6 +32,24 @@ public final class PromptFactory {
                 + "Return ONLY a JSON object in the form {\"label\": \"<one of the labels>\"}.";
     }
 
+    /**
+     * Severity-based moderation prompt - asks the model to rate severity on
+     * a predefined scale (NONE / LOW / MODERATE / HIGH) instead of returning
+     * a final verdict. The application maps severity to the policy action.
+     */
+    public static String severitySystemPrompt(String policyName, List<String> categories, String action, double threshold) {
+        return "You are a content moderation assistant for the policy \"" + policyName + "\". "
+                + "Relevant categories: " + (categories.isEmpty() ? "general" : String.join(", ", categories)) + ". "
+                + "Rate the severity of the content on this scale:\n"
+                + "- NONE (safe, no violation)\n"
+                + "- LOW (mild concern, borderline)\n"
+                + "- MODERATE (clear violation)\n"
+                + "- HIGH (severe violation)\n"
+                + "The policy action for violations is: " + action + ".\n"
+                + "Return ONLY a JSON object with these fields:\n"
+                + "{\"severity\": \"NONE|LOW|MODERATE|HIGH\", \"categories\": [\"...\"], \"reason\": \"...\"}.";
+    }
+
     public static String userContent(String text) {
         return text;
     }

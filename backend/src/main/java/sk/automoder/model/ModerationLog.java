@@ -44,6 +44,10 @@ public class ModerationLog {
     @Column(nullable = false)
     private String verdict;
 
+    /** Severity level returned by the model (NONE/LOW/MODERATE/HIGH). */
+    @Column(length = 16)
+    private String severity;
+
     @Column(columnDefinition = "text")
     private String categories;
 
@@ -110,6 +114,14 @@ public class ModerationLog {
 
     public void setVerdict(String verdict) {
         this.verdict = verdict;
+    }
+
+    public String getSeverity() {
+        return severity;
+    }
+
+    public void setSeverity(String severity) {
+        this.severity = severity;
     }
 
     public String getCategories() {
