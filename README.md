@@ -1,5 +1,9 @@
 # AutoModer AI — Automatizovaná moderácia používateľského obsahu pomocou AI
 
+> **Poznámka:** Tento dokument je raný koncept (návrh) aplikácie a zámerne sa
+> neudržiava v synchronizácii s implementáciou. Neodráža aktuálny stav kódu ani
+> REST API. Aktuálny technický stav je v `AGENTS.md`.
+
 > Diplomová práca: **Využitie a porovnanie modelov umelej inteligencie pri automatizovanej moderácii používateľského obsahu**
 >
 > Cieľ: navrhnúť a implementovať webovú aplikáciu, ktorá pomocou AI modelov automaticky analyzuje a moderuje používateľsky vytvorený obsah (texty a obrázky) podľa zvolených politík, a benchmark modul na porovnávanie rôznych modelov (Gemini, Claude, ChatGPT / OpenRouter).

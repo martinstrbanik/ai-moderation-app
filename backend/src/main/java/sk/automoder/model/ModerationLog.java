@@ -56,6 +56,10 @@ public class ModerationLog {
     @Column(name = "latency_ms")
     private Long latencyMs;
 
+    /** Correlation id of the batched moderation request this log row belongs to. */
+    @Column(name = "request_id", length = 64)
+    private String requestId;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -146,6 +150,14 @@ public class ModerationLog {
 
     public void setLatencyMs(Long latencyMs) {
         this.latencyMs = latencyMs;
+    }
+
+    public String getRequestId() {
+        return requestId;
+    }
+
+    public void setRequestId(String requestId) {
+        this.requestId = requestId;
     }
 
     public Instant getCreatedAt() {

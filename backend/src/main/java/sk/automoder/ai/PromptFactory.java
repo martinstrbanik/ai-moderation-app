@@ -50,6 +50,29 @@ public final class PromptFactory {
                 + "{\"severity\": \"NONE|LOW|MODERATE|HIGH\", \"categories\": [\"...\"], \"reason\": \"...\"}.";
     }
 
+    /**
+     * Severity-based moderation prompt for a batch of texts - returns a JSON array
+     * of {@code {"id": n, "severity": "...", "categories": [...], "reason": "..."}}
+     * objects, one per input text, in exactly the same order. The {@code id} is the
+     * 1-based number of the text as produced by {@link #batchUserContent(List)}.
+     */
+    public static String severityBatchSystemPrompt(String policyName, List<String> categories,
+                                                   String action, double threshold) {
+        return "You are a content moderation assistant for the policy \"" + policyName + "\". "
+                + "Relevant categories: " + (categories.isEmpty() ? "general" : String.join(", ", categories)) + ". "
+                + "The user provides numbered texts. For EVERY text rate its severity on this scale:\n"
+                + "- NONE (safe, no violation)\n"
+                + "- LOW (mild concern, borderline)\n"
+                + "- MODERATE (clear violation)\n"
+                + "- HIGH (severe violation)\n"
+                + "The policy action for violations is: " + action + ".\n"
+                + "Return ONLY a JSON array of objects, one per input text, in exactly the same order, "
+                + "each object in the form "
+                + "{\"id\": <number from 1>, \"severity\": \"NONE|LOW|MODERATE|HIGH\", "
+                + "\"categories\": [\"...\"], \"reason\": \"...\"}. "
+                + "Do not omit or add any text.";
+    }
+
     public static String userContent(String text) {
         return text;
     }

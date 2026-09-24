@@ -36,6 +36,10 @@ Language conventions:
 - **All code, comments and this file: English.**
 - **`README.md` (root) and `data/README.md`: Slovak** (thesis design doc /
   dataset doc — intentionally not translated).
+- **`README.md` is an early design concept and is intentionally NOT kept in sync
+  with the implementation** (do not update it when code/API changes; it carries a
+  note saying so). **This file (`AGENTS.md`) is the single source of truth for the
+  current state of the code, config and REST API.**
 
 ---
 
@@ -128,7 +132,7 @@ Key services:
 
 - `AiModelService`, `PolicyService`, `ApiKeyService` — CRUD + validation.
 - `DatasetService` — imports JSONL datasets at startup, read access.
-- `ModerationService` — text moderation (policy → model → severity → verdict).
+- `ModerationService` — **batched** text moderation (policy → model → severity → verdict); `ModerationMapping` — pure verdict mapping + grouping/aggregation helpers.
 - `BenchmarkService` — creates runs; `BenchmarkExecutor` — runs them async.
 - `Metrics` — pure metric computation (macro precision/recall/F1 + accuracy).
 
@@ -143,7 +147,7 @@ Entities (all in `model/`):
 | `AiModel` | provider(`openrouter`), `modelId`(unique), name, `type`(TEXT/VISION), enabled | reference catalog; **no** inference params stored (fixed: temperature=0, JSON output) |
 | `ApiKey` | tenantId, provider, `encryptedKey` (AES/GCM), label | BYO key; plaintext never returned |
 | `Policy` | tenantId, name, description, categories(JSON), rules(JSON), `threshold`(0..1), `action`(ALLOW/FLAG/BLOCK), modelId, fallbackModelId, active, version | `version` increments on update/activation change |
-| `ModerationLog` | tenantId, policy, model, contentType, verdict, `severity`, categories, confidence, latencyMs | audit of each moderation |
+| `ModerationLog` | tenantId, policy, model, contentType, verdict, `severity`, categories, confidence, latencyMs, `requestId` | audit of each moderation (one row per moderated text); `requestId` groups the rows of one batched request |
 | `Dataset` | name, description, source | reference registry (no tenantId) |
 | `DatasetSample` | dataset, content, imageUrl, expectedLabel | one sample; `expectedLabel` used as ground truth |
 | `BenchmarkRun` | tenantId, dataset, policy(nullable), apiKeyId, level, batchSize, status, published, startedAt, finishedAt | one benchmark run |
@@ -176,7 +180,8 @@ Non-secret config:
 | `automoder.openrouter.base-url` | `https://openrouter.ai/api/v1` | provider base URL |
 | `automoder.openrouter.timeout-seconds` | `120` | per-call read timeout (lower for slow/free models) |
 | `automoder.datasets.path` | `../data/processed` | JSONL import path (relative to `backend/`) |
-| `automoder.benchmark.batch-size` | `10` | samples per OpenRouter call |
+| `automoder.benchmark.batch-size` | `10` | samples per OpenRouter call (benchmark) |
+| `automoder.moderation.batch-size` | `10` | texts per OpenRouter call (moderation); overridable per request via `batchSize` |
 
 Seeds (`DataInitializer`): if the model catalog is empty, 4 OpenRouter models are
 inserted — `google/gemini-2.0-flash` (VISION), `openai/gpt-4o-mini` (TEXT),
@@ -243,7 +248,7 @@ Example request bodies:
     POST /api/api-keys        {"label":"my-key","key":"sk-or-v1-..."}
     POST /api/policies        {"name":"Hate","description":"...","categories":"[\"hate_speech\"]","rules":"{}","threshold":0.5,"action":"BLOCK","modelId":3,"fallbackModelId":null,"active":true}
     POST /api/benchmarks/runs {"datasetId":1,"policyId":2,"modelIds":[3,8],"level":"EXTRA_LIGHT","apiKeyId":null,"batchSize":10}
-    POST /api/moderation      {"policyId":2,"text":"text to moderate"}
+    POST /api/moderation      {"policyId":2,"batchSize":10,"items":[{"id":"user-comment-1","text":"text to moderate"},{"id":"user-comment-2","text":"another text"}]}
 
 Error shape (`ApiError`): `{timestamp, status, error, message, path, fieldErrors}`.
 
@@ -257,33 +262,72 @@ Error shape (`ApiError`): `{timestamp, status, error, message, path, fieldErrors
 latencyMs)`, where `costUsd` comes from the response `usage.cost`.
 
 - The API key is decrypted from `ApiKey` on demand (`ApiKeyService.resolveDefaultPlainKey()`).
-- `PromptFactory` owns **all** prompts (moderation severity prompt, single
-  classification prompt, batch classification prompt).
+- `PromptFactory` owns **all** prompts (moderation severity prompt, batch moderation
+  severity prompt, single classification prompt, batch classification prompt).
 - Failures throw `AiProviderException`.
 
 ---
 
 ## 11. Moderation module
 
-Endpoint: `POST /api/moderation {"policyId": <id>, "text": "..."}` →
-`{verdict, severity, risk, categories, reason, modelId, modelName, latencyMs, policyId}`.
+Endpoint: `POST /api/moderation` — **batched**. Request:
 
-Flow (`ModerationService.moderate`):
+    {"policyId": 2, "batchSize": 10, "items": [{"id": "user-comment-1", "text": "..."}, ...]}
+
+- `id` inside an item is an **external id** supplied by the caller; the app also
+  assigns its own **internal id** (the 1-based position in the request), which is
+  used to reference texts in the batch prompt and appears in the output.
+- `batchSize` is optional (1..100) → defaults to `automoder.moderation.batch-size` (10).
+
+Response: the moderated texts grouped by verdict (in input order within each list)
+plus request-level metadata:
+
+    {
+      "allow": [ {id, externalId, text, verdict, severity, risk, categories, reason, latencyMs, cost}, ... ],
+      "flag":  [ ... ],
+      "block": [ ... ],
+      "policyId", "policyName", "threshold", "action",
+      "modelId", "modelName", "usedFallback",
+      "requestId", "batchSize", "batchCount", "totalItems",
+      "verdictCounts", "severityCounts", "categoryCounts",
+      "latencyMs", "cost", "avgLatencyPerItem", "timestamp"
+    }
+
+Flow (`ModerationService.moderate(policyId, items, batchSize)`):
 
 1. Load policy, require `active=true` (else 400).
 2. Resolve BYO key (`ApiKeyService.resolveDefaultPlainKey()`, else 400).
-3. Build a **severity prompt** (`PromptFactory.severitySystemPrompt`): the model
-   rates severity as `NONE|LOW|MODERATE|HIGH` and returns JSON
-   `{"severity": "...", "categories": [...], "reason": "..."}`.
-4. Call the policy's primary model; on failure try `fallbackModelId`.
+3. Build **severity prompts**: single (`PromptFactory.severitySystemPrompt`) and
+   batch (`PromptFactory.severityBatchSystemPrompt`). The model rates severity as
+   `NONE|LOW|MODERATE|HIGH`; the batch variant returns a JSON array
+   `[{"id": n, "severity": "...", "categories": [...], "reason": "..."}]` in input order.
+   **`id` in that array is batch-relative (1..batchSize)**, because
+   `PromptFactory.batchUserContent` numbers texts from 1 within each batch — the
+   parser maps it back to the batch position (not the global internal id).
+4. Split items into batches of `batchSize`; one call per batch. On
+   `AiProviderException` retry the batch with `fallbackModelId` (`usedFallback=true`);
+   if the batch response is unusable, **fall back to individual calls** for that batch
+   (same pattern as the benchmark, §12).
 5. **Verdict mapping** (app-side, per the design decision):
    `severityOrdinal >= floor(threshold * 4)` → `policy.action`, else `ALLOW`
    (ordinals NONE=0, LOW=1, MODERATE=2, HIGH=3). So threshold 0.5 triggers on
    MODERATE/HIGH, 0.75 only on HIGH, etc.
-6. Save a `ModerationLog` row and return the response.
+6. **Unclassified texts → `flag`**: when a text could not be classified (batch and
+   individual attempts failed, or missing from the response) it is placed in the
+   `flag` list with `severity="UNKNOWN"`, `risk=0`, and the error in `reason` — FLAG
+   already means "needs human review", so there is no separate error list.
+7. Save one `ModerationLog` row **per text** (carrying `requestId` of the request);
+   the log `latencyMs`/`confidence` are the per-item attributed values.
+8. Aggregate (`ModerationMapping` — pure, unit-tested) and return the response.
+
+**Cost/latency attribution caveat:** per-item `latencyMs` and `cost` are
+**attributions, not per-text measurements** — the whole batch's latency is assigned
+to each text of the batch and the batch's `usage.cost` is split evenly
+(`batchCost / batchSize`). Same caveat as the benchmark batch-size note (§12).
 
 Rationale: keeping a **categorical severity** (not a raw 0–1 score) is more
-cross-model consistent; the final verdict is what gets measured.
+cross-model consistent; the final verdict is what gets measured. Batching reduces
+HTTP calls and repeated prompt cost.
 
 Not implemented yet: image/vision moderation (would need a multimodal
 `OpenRouterClient` call), `rules` pre-filter (blacklist/regex), and the
@@ -369,7 +413,11 @@ Implemented and verified:
 - **Milestone 3** — OpenRouter integration; dataset import; benchmark engine
   (async, levels, metrics, latency/cost) + progress logging + batching.
 - **Milestone 4** — moderation v1 (text, severity-based verdict mapping, logging).
-- Tests: `mvn test` green (`AutomodApplicationTests`, `MetricsTest`).
+- **Milestone 5** — batched moderation: `POST /api/moderation` takes a list of texts
+  (`items[{id,text}]`) + optional `batchSize` and returns them grouped into
+  `allow`/`flag`/`block` lists with request metadata and aggregates; unclassified
+  texts go to `flag` (severity `UNKNOWN`); `ModerationLog.requestId` correlates rows.
+- Tests: `mvn test` green (`AutomodApplicationTests`, `MetricsTest`, `ModerationMappingTest`, `ModerationServiceTest` — 17 tests).
 - Postman collection covers all current endpoints.
 
 Known verification notes: model calls were only exercised with a **fake key**
@@ -404,4 +452,4 @@ OpenRouter key.
 
 ---
 
-_Last substantial update: moderation v1 + benchmark batching + per-run batchSize._
+_Last substantial update: batched moderation (grouped verdict output, request metadata, `requestId`)._

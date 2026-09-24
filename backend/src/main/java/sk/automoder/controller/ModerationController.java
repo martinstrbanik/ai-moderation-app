@@ -21,6 +21,6 @@ public class ModerationController {
 
     @PostMapping
     public ModerationResponse moderate(@Valid @RequestBody ModerationRequest request) {
-        return moderationService.moderate(request.policyId(), request.text());
+        return moderationService.moderate(request.policyId(), request.items(), request.batchSize());
     }
 }

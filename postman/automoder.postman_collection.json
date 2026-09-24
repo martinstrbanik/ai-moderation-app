@@ -79,7 +79,7 @@
       "name": "Moderation /api/moderation",
       "item": [
         {
-          "name": "Moderate text",
+          "name": "Moderate texts (batch)",
           "request": {
             "method": "POST",
             "header": [
@@ -100,7 +100,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"policyId\": 2,\n    \"text\": \"Your text to moderate...\"\n}"
+              "raw": "{\n    \"policyId\": 2,\n    \"batchSize\": 10,\n    \"items\": [\n        { \"id\": \"user-comment-1\", \"text\": \"Your text to moderate...\" },\n        { \"id\": \"user-comment-2\", \"text\": \"Another text to moderate...\" }\n    ]\n}"
             }
           }
         }
