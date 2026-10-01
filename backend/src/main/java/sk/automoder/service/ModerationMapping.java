@@ -2,6 +2,7 @@ package sk.automoder.service;
 
 import sk.automoder.dto.ModerationResponse.ModerationResultItem;
 import sk.automoder.model.PolicyAction;
+import sk.automoder.model.Severity;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -16,31 +17,22 @@ import java.util.TreeMap;
  */
 public final class ModerationMapping {
 
-    /** Severity used for texts the model could not classify; such items become FLAG. */
-    public static final String SEVERITY_UNKNOWN = "UNKNOWN";
-
-    private static final List<String> SEVERITY_LEVELS =
-            List.of("NONE", "LOW", "MODERATE", "HIGH", SEVERITY_UNKNOWN);
-
-    private static final Map<String, Integer> SEVERITY_ORDER = Map.of(
-            "NONE", 0, "LOW", 1, "MODERATE", 2, "HIGH", 3
-    );
-
     private ModerationMapping() {
     }
 
     /**
-     * Maps a model severity to a verdict using the policy threshold:
-     * {@code severityOrdinal >= floor(threshold * 4)} → {@code action}, else {@code ALLOW}
-     * (ordinals NONE=0, LOW=1, MODERATE=2, HIGH=3).
+     * Maps a model severity to a verdict using the policy threshold: if the rated
+     * severity is at least {@code threshold} (the minimum severity that triggers the
+     * action) the policy {@code action} is returned, otherwise {@link PolicyAction#ALLOW}.
+     *
+     * <p>{@link Severity#UNKNOWN} (unclassified) never triggers the action here; the
+     * service places such items in {@code FLAG} explicitly.</p>
      */
-    public static PolicyAction mapVerdict(double threshold, PolicyAction action, String severity) {
-        int sevOrd = SEVERITY_ORDER.getOrDefault(severity == null ? "" : severity.toUpperCase(), 0);
-        int threshOrd = (int) Math.floor(threshold * 4);
-        if (threshOrd > 3) {
-            threshOrd = 3;
+    public static PolicyAction mapVerdict(Severity threshold, PolicyAction action, Severity severity) {
+        if (severity == null || threshold == null) {
+            return PolicyAction.ALLOW;
         }
-        return sevOrd >= threshOrd ? action : PolicyAction.ALLOW;
+        return severity.atLeast(threshold) ? action : PolicyAction.ALLOW;
     }
 
     /**
@@ -73,11 +65,11 @@ public final class ModerationMapping {
     /** Counts results per severity, ordered NONE/LOW/MODERATE/HIGH/UNKNOWN (0 when absent). */
     public static Map<String, Integer> severityCounts(List<ModerationResultItem> items) {
         Map<String, Integer> out = new LinkedHashMap<>();
-        for (String level : SEVERITY_LEVELS) {
-            out.put(level, 0);
+        for (Severity level : Severity.values()) {
+            out.put(level.name(), 0);
         }
         for (ModerationResultItem item : items) {
-            String level = item.severity() == null ? SEVERITY_UNKNOWN : item.severity().toUpperCase();
+            String level = item.severity() == null ? Severity.UNKNOWN.name() : item.severity().name();
             out.merge(level, 1, Integer::sum);
         }
         return out;

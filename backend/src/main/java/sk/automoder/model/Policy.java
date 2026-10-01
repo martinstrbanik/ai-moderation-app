@@ -41,8 +41,13 @@ public class Policy {
     @Column(columnDefinition = "text")
     private String rules;
 
-    @Column(nullable = false)
-    private double threshold;
+    /**
+     * Minimum severity that triggers {@link #action}. Added nullable to stay
+     * compatible with {@code ddl-auto=update} on a table that already has rows.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "threshold_severity", length = 16)
+    private Severity thresholdSeverity;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 16)
@@ -134,12 +139,12 @@ public class Policy {
         this.rules = rules;
     }
 
-    public double getThreshold() {
-        return threshold;
+    public Severity getThresholdSeverity() {
+        return thresholdSeverity;
     }
 
-    public void setThreshold(double threshold) {
-        this.threshold = threshold;
+    public void setThresholdSeverity(Severity thresholdSeverity) {
+        this.thresholdSeverity = thresholdSeverity;
     }
 
     public PolicyAction getAction() {

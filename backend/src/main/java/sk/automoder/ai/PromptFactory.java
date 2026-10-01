@@ -12,18 +12,6 @@ public final class PromptFactory {
     }
 
     /**
-     * Moderation prompt - classifies content according to a policy.
-     */
-    public static String moderationSystemPrompt(String policyName, List<String> categories, String action, double threshold) {
-        return "You are a content moderation assistant for the policy \"" + policyName + "\". "
-                + "Relevant categories: " + (categories.isEmpty() ? "general" : String.join(", ", categories)) + ". "
-                + "The moderation action must be one of ALLOW, FLAG, BLOCK. "
-                + "Threshold for blocking: " + threshold + ". "
-                + "Return ONLY a JSON object with these fields: "
-                + "{\"verdict\": \"ALLOW|FLAG|BLOCK\", \"categories\": [\"...\"], \"confidence\": 0.0-1.0, \"reason\": \"...\"}.";
-    }
-
-    /**
      * Benchmark classification prompt - classifies content into the dataset label set.
      */
     public static String classificationSystemPrompt(List<String> labels) {
@@ -37,7 +25,7 @@ public final class PromptFactory {
      * a predefined scale (NONE / LOW / MODERATE / HIGH) instead of returning
      * a final verdict. The application maps severity to the policy action.
      */
-    public static String severitySystemPrompt(String policyName, List<String> categories, String action, double threshold) {
+    public static String severitySystemPrompt(String policyName, List<String> categories, String action) {
         return "You are a content moderation assistant for the policy \"" + policyName + "\". "
                 + "Relevant categories: " + (categories.isEmpty() ? "general" : String.join(", ", categories)) + ". "
                 + "Rate the severity of the content on this scale:\n"
@@ -57,7 +45,7 @@ public final class PromptFactory {
      * 1-based number of the text as produced by {@link #batchUserContent(List)}.
      */
     public static String severityBatchSystemPrompt(String policyName, List<String> categories,
-                                                   String action, double threshold) {
+                                                   String action) {
         return "You are a content moderation assistant for the policy \"" + policyName + "\". "
                 + "Relevant categories: " + (categories.isEmpty() ? "general" : String.join(", ", categories)) + ". "
                 + "The user provides numbered texts. For EVERY text rate its severity on this scale:\n"

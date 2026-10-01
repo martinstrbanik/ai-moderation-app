@@ -146,8 +146,8 @@ Entities (all in `model/`):
 |--------|-----------|-------|
 | `AiModel` | provider(`openrouter`), `modelId`(unique), name, `type`(TEXT/VISION), enabled | reference catalog; **no** inference params stored (fixed: temperature=0, JSON output) |
 | `ApiKey` | tenantId, provider, `encryptedKey` (AES/GCM), label | BYO key; plaintext never returned |
-| `Policy` | tenantId, name, description, categories(JSON), rules(JSON), `threshold`(0..1), `action`(ALLOW/FLAG/BLOCK), modelId, fallbackModelId, active, version | `version` increments on update/activation change |
-| `ModerationLog` | tenantId, policy, model, contentType, verdict, `severity`, categories, confidence, latencyMs, `requestId` | audit of each moderation (one row per moderated text); `requestId` groups the rows of one batched request |
+| `Policy` | tenantId, name, description, categories(JSON), rules(JSON), `thresholdSeverity`(NONE/LOW/MODERATE/HIGH), `action`(ALLOW/FLAG/BLOCK), modelId, fallbackModelId, active, version | `version` increments on update/activation change; `thresholdSeverity` = minimum severity that triggers `action` |
+| `ModerationLog` | tenantId, policy, model, contentType, verdict, `severity`(Severity enum), categories, confidence, latencyMs, `requestId` | audit of each moderation (one row per moderated text); `requestId` groups the rows of one batched request |
 | `Dataset` | name, description, source | reference registry (no tenantId) |
 | `DatasetSample` | dataset, content, imageUrl, expectedLabel | one sample; `expectedLabel` used as ground truth |
 | `BenchmarkRun` | tenantId, dataset, policy(nullable), apiKeyId, level, batchSize, status, published, startedAt, finishedAt | one benchmark run |
@@ -155,7 +155,8 @@ Entities (all in `model/`):
 
 Enums: `ModelType{TEXT,VISION}`, `PolicyAction{ALLOW,FLAG,BLOCK}`,
 `ContentType{TEXT,IMAGE}`, `BenchmarkLevel{EXTRA_LIGHT,LIGHT,FULL}`,
-`RunStatus{PENDING,RUNNING,COMPLETED,FAILED}`.
+`RunStatus{PENDING,RUNNING,COMPLETED,FAILED}`, `Severity{NONE,LOW,MODERATE,HIGH,UNKNOWN}`
+(`UNKNOWN` is an app-side sentinel for unclassified texts and is never a valid policy threshold).
 
 **Tenancy:** the app is effectively single-tenant today, but entities carry
 `tenantId` (constant `"default"`, see `PolicyService.DEFAULT_TENANT`) to be
@@ -246,7 +247,7 @@ Example request bodies:
 
     POST /api/models          {"modelId":"openai/gpt-4o-mini","name":"GPT-4o mini","type":"TEXT","enabled":true}
     POST /api/api-keys        {"label":"my-key","key":"sk-or-v1-..."}
-    POST /api/policies        {"name":"Hate","description":"...","categories":"[\"hate_speech\"]","rules":"{}","threshold":0.5,"action":"BLOCK","modelId":3,"fallbackModelId":null,"active":true}
+    POST /api/policies        {"name":"Hate","description":"...","categories":"[\"hate_speech\"]","rules":"{}","thresholdSeverity":"MODERATE","action":"BLOCK","modelId":3,"fallbackModelId":null,"active":true}
     POST /api/benchmarks/runs {"datasetId":1,"policyId":2,"modelIds":[3,8],"level":"EXTRA_LIGHT","apiKeyId":null,"batchSize":10}
     POST /api/moderation      {"policyId":2,"batchSize":10,"items":[{"id":"user-comment-1","text":"text to moderate"},{"id":"user-comment-2","text":"another text"}]}
 
@@ -286,7 +287,7 @@ plus request-level metadata:
       "allow": [ {id, externalId, text, verdict, severity, risk, categories, reason, latencyMs, cost}, ... ],
       "flag":  [ ... ],
       "block": [ ... ],
-      "policyId", "policyName", "threshold", "action",
+      "policyId", "policyName", "thresholdSeverity", "action",
       "modelId", "modelName", "usedFallback",
       "requestId", "batchSize", "batchCount", "totalItems",
       "verdictCounts", "severityCounts", "categoryCounts",
@@ -309,9 +310,11 @@ Flow (`ModerationService.moderate(policyId, items, batchSize)`):
    if the batch response is unusable, **fall back to individual calls** for that batch
    (same pattern as the benchmark, §12).
 5. **Verdict mapping** (app-side, per the design decision):
-   `severityOrdinal >= floor(threshold * 4)` → `policy.action`, else `ALLOW`
-   (ordinals NONE=0, LOW=1, MODERATE=2, HIGH=3). So threshold 0.5 triggers on
-   MODERATE/HIGH, 0.75 only on HIGH, etc.
+   the model's rated severity is compared against the policy's `thresholdSeverity`
+   (the **minimum** severity that triggers the action): `severity >= thresholdSeverity`
+   → `policy.action`, else `ALLOW` (order NONE=0, LOW=1, MODERATE=2, HIGH=3 via the
+   `Severity` enum). So `thresholdSeverity = MODERATE` triggers on MODERATE/HIGH,
+   `HIGH` only on HIGH, etc. (`UNKNOWN` never triggers via this path.)
 6. **Unclassified texts → `flag`**: when a text could not be classified (batch and
    individual attempts failed, or missing from the response) it is placed in the
    `flag` list with `severity="UNKNOWN"`, `risk=0`, and the error in `reason` — FLAG
@@ -390,6 +393,12 @@ Timing reference (single vs batch, cheap model): single ≈ 3.8 s/sample;
 - **Hibernate `ddl-auto=update` limitation**: adding a `NOT NULL` column to a
   table that already has rows fails. New columns added to existing tables should
   be **nullable** (e.g. `BenchmarkResult.processedSamples` is `Integer`).
+- **Policy threshold migration**: `Policy.threshold` (double 0..1) was replaced by
+  `Policy.thresholdSeverity` (`Severity` enum). `ddl-auto=update` adds the new
+  `threshold_severity` column but does **not** drop the old NOT NULL `threshold`
+  column, so on an existing DB run: `ALTER TABLE policy ALTER COLUMN threshold DROP
+  NOT NULL;` (and optionally backfill `threshold_severity` then `DROP COLUMN
+  threshold`). Otherwise inserts fail because the old column has no default.
 - **Shared dev DB + shared JVM ports**: don't assume an empty DB; clean up test
   rows you create. Don't kill processes by name (see §3).
 - **No sudo**: the environment has no passwordless sudo; the toolchain is
@@ -452,4 +461,4 @@ OpenRouter key.
 
 ---
 
-_Last substantial update: batched moderation (grouped verdict output, request metadata, `requestId`)._
+_Last substantial update: categorical policy threshold (`Severity` enum) replacing the numeric `threshold`; severity is now the `Severity` enum throughout._

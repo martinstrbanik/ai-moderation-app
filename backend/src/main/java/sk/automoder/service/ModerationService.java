@@ -18,6 +18,7 @@ import sk.automoder.model.ContentType;
 import sk.automoder.model.ModerationLog;
 import sk.automoder.model.Policy;
 import sk.automoder.model.PolicyAction;
+import sk.automoder.model.Severity;
 import sk.automoder.repository.ModerationLogRepository;
 
 import java.time.Instant;
@@ -78,9 +79,9 @@ public class ModerationService {
         List<String> catLabels = parseCategoriesArray(policy.getCategories());
 
         String singlePrompt = PromptFactory.severitySystemPrompt(
-                policy.getName(), catLabels, policy.getAction().name(), policy.getThreshold());
+                policy.getName(), catLabels, policy.getAction().name());
         String batchPrompt = PromptFactory.severityBatchSystemPrompt(
-                policy.getName(), catLabels, policy.getAction().name(), policy.getThreshold());
+                policy.getName(), catLabels, policy.getAction().name());
 
         int effectiveBatchSize = Math.max(1, requestBatchSize != null ? requestBatchSize : defaultBatchSize);
         String requestId = UUID.randomUUID().toString();
@@ -151,7 +152,7 @@ public class ModerationService {
             for (Target target : batch) {
                 Parsed p = parsed.get(target.internalId());
                 PolicyAction verdict;
-                String severity;
+                Severity severity;
                 List<String> categories;
                 String reason;
                 double risk;
@@ -160,10 +161,10 @@ public class ModerationService {
                     categories = p.categories();
                     reason = p.reason();
                     verdict = ModerationMapping.mapVerdict(
-                            policy.getThreshold(), policy.getAction(), severity);
+                            policy.getThresholdSeverity(), policy.getAction(), severity);
                     risk = ModerationResponse.riskFromSeverity(severity);
                 } else {
-                    severity = ModerationMapping.SEVERITY_UNKNOWN;
+                    severity = Severity.UNKNOWN;
                     categories = List.of();
                     verdict = PolicyAction.FLAG;
                     risk = 0.0;
@@ -200,7 +201,7 @@ public class ModerationService {
                 grouped.get(PolicyAction.BLOCK.name()),
                 policy.getId(),
                 policy.getName(),
-                policy.getThreshold(),
+                policy.getThresholdSeverity(),
                 policy.getAction().name(),
                 lastModel.getId(),
                 lastModel.getModelId(),
@@ -261,9 +262,21 @@ public class ModerationService {
 
     private Parsed toParsed(JsonNode node) {
         return new Parsed(
-                node.path("severity").asText("NONE").toUpperCase(),
+                parseSeverity(node.path("severity").asText("NONE")),
                 parseCategoriesArray(node.path("categories")),
                 node.path("reason").asText(""));
+    }
+
+    /** Parses a model severity string into the enum, defaulting to NONE on unknown values. */
+    private Severity parseSeverity(String raw) {
+        if (raw == null) {
+            return Severity.NONE;
+        }
+        try {
+            return Severity.valueOf(raw.trim().toUpperCase());
+        } catch (IllegalArgumentException e) {
+            return Severity.NONE;
+        }
     }
 
     private <T> List<List<T>> partition(List<T> list, int size) {
@@ -303,6 +316,6 @@ public class ModerationService {
     }
 
     /** Severity details parsed from a model response for one text. */
-    private record Parsed(String severity, List<String> categories, String reason) {
+    private record Parsed(Severity severity, List<String> categories, String reason) {
     }
 }

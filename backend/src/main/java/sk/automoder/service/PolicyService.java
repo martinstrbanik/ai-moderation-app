@@ -4,8 +4,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import sk.automoder.dto.PolicyRequest;
 import sk.automoder.dto.PolicyResponse;
+import sk.automoder.exception.BadRequestException;
 import sk.automoder.exception.NotFoundException;
 import sk.automoder.model.Policy;
+import sk.automoder.model.Severity;
 import sk.automoder.repository.PolicyRepository;
 
 import java.util.List;
@@ -66,11 +68,15 @@ public class PolicyService {
     }
 
     private void apply(Policy policy, PolicyRequest request) {
+        if (request.thresholdSeverity() == Severity.UNKNOWN) {
+            throw new BadRequestException(
+                    "thresholdSeverity must be one of NONE, LOW, MODERATE, HIGH.");
+        }
         policy.setName(request.name());
         policy.setDescription(request.description());
         policy.setCategories(request.categories());
         policy.setRules(request.rules());
-        policy.setThreshold(request.threshold());
+        policy.setThresholdSeverity(request.thresholdSeverity());
         policy.setAction(request.action());
         policy.setModelId(request.modelId());
         policy.setFallbackModelId(request.fallbackModelId());

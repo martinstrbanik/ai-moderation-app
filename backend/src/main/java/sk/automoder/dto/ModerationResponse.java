@@ -1,5 +1,7 @@
 package sk.automoder.dto;
 
+import sk.automoder.model.Severity;
+
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -20,7 +22,7 @@ public record ModerationResponse(
         // policy context
         Long policyId,
         String policyName,
-        Double threshold,
+        Severity thresholdSeverity,
         String action,
 
         // model context
@@ -46,10 +48,6 @@ public record ModerationResponse(
         Instant timestamp
 ) {
 
-    private static final Map<String, Integer> SEVERITY_ORDER = Map.of(
-            "NONE", 0, "LOW", 1, "MODERATE", 2, "HIGH", 3
-    );
-
     /**
      * A single moderated text.
      *
@@ -66,7 +64,7 @@ public record ModerationResponse(
             String externalId,
             String text,
             String verdict,
-            String severity,
+            Severity severity,
             double risk,
             List<String> categories,
             String reason,
@@ -75,14 +73,15 @@ public record ModerationResponse(
     ) {
     }
 
-    public static double riskFromSeverity(String severity) {
-        int ord = SEVERITY_ORDER.getOrDefault(severity.toUpperCase(), 0);
-        return switch (ord) {
-            case 0 -> 0.0;
-            case 1 -> 1.0 / 3.0;
-            case 2 -> 2.0 / 3.0;
-            case 3 -> 1.0;
-            default -> 0.0;
+    public static double riskFromSeverity(Severity severity) {
+        if (severity == null) {
+            return 0.0;
+        }
+        return switch (severity) {
+            case NONE, UNKNOWN -> 0.0;
+            case LOW -> 1.0 / 3.0;
+            case MODERATE -> 2.0 / 3.0;
+            case HIGH -> 1.0;
         };
     }
 }

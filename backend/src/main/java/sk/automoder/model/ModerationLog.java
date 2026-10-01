@@ -44,9 +44,10 @@ public class ModerationLog {
     @Column(nullable = false)
     private String verdict;
 
-    /** Severity level returned by the model (NONE/LOW/MODERATE/HIGH). */
+    /** Severity level returned by the model (NONE/LOW/MODERATE/HIGH, or UNKNOWN if unclassified). */
+    @Enumerated(EnumType.STRING)
     @Column(length = 16)
-    private String severity;
+    private Severity severity;
 
     @Column(columnDefinition = "text")
     private String categories;
@@ -120,11 +121,11 @@ public class ModerationLog {
         this.verdict = verdict;
     }
 
-    public String getSeverity() {
+    public Severity getSeverity() {
         return severity;
     }
 
-    public void setSeverity(String severity) {
+    public void setSeverity(Severity severity) {
         this.severity = severity;
     }
 

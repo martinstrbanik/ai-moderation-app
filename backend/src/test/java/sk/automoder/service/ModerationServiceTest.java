@@ -12,6 +12,7 @@ import sk.automoder.model.AiModel;
 import sk.automoder.model.ModelType;
 import sk.automoder.model.Policy;
 import sk.automoder.model.PolicyAction;
+import sk.automoder.model.Severity;
 import sk.automoder.repository.ModerationLogRepository;
 
 import java.util.List;
@@ -57,7 +58,7 @@ class ModerationServiceTest {
         policy.setId(2L);
         policy.setName("Hate detection");
         policy.setCategories("[\"hate_speech\"]");
-        policy.setThreshold(0.5);
+        policy.setThresholdSeverity(Severity.MODERATE);
         policy.setAction(PolicyAction.BLOCK);
         policy.setModelId(3L);
         policy.setActive(true);

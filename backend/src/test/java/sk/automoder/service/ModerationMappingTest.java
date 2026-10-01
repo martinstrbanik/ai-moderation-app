@@ -3,6 +3,7 @@ package sk.automoder.service;
 import org.junit.jupiter.api.Test;
 import sk.automoder.dto.ModerationResponse.ModerationResultItem;
 import sk.automoder.model.PolicyAction;
+import sk.automoder.model.Severity;
 
 import java.util.List;
 import java.util.Map;
@@ -17,29 +18,29 @@ class ModerationMappingTest {
     // ---------- verdict mapping ----------
 
     @Test
-    void thresholdHalfTriggersOnModerateAndHigh() {
+    void moderateThresholdTriggersOnModerateAndHigh() {
         assertEquals(PolicyAction.ALLOW,
-                ModerationMapping.mapVerdict(0.5, PolicyAction.BLOCK, "NONE"));
+                ModerationMapping.mapVerdict(Severity.MODERATE, PolicyAction.BLOCK, Severity.NONE));
         assertEquals(PolicyAction.ALLOW,
-                ModerationMapping.mapVerdict(0.5, PolicyAction.BLOCK, "LOW"));
+                ModerationMapping.mapVerdict(Severity.MODERATE, PolicyAction.BLOCK, Severity.LOW));
         assertEquals(PolicyAction.BLOCK,
-                ModerationMapping.mapVerdict(0.5, PolicyAction.BLOCK, "MODERATE"));
+                ModerationMapping.mapVerdict(Severity.MODERATE, PolicyAction.BLOCK, Severity.MODERATE));
         assertEquals(PolicyAction.BLOCK,
-                ModerationMapping.mapVerdict(0.5, PolicyAction.BLOCK, "HIGH"));
+                ModerationMapping.mapVerdict(Severity.MODERATE, PolicyAction.BLOCK, Severity.HIGH));
     }
 
     @Test
     void highThresholdOnlyTriggersOnHigh() {
         assertEquals(PolicyAction.ALLOW,
-                ModerationMapping.mapVerdict(0.75, PolicyAction.FLAG, "MODERATE"));
+                ModerationMapping.mapVerdict(Severity.HIGH, PolicyAction.FLAG, Severity.MODERATE));
         assertEquals(PolicyAction.FLAG,
-                ModerationMapping.mapVerdict(0.75, PolicyAction.FLAG, "HIGH"));
+                ModerationMapping.mapVerdict(Severity.HIGH, PolicyAction.FLAG, Severity.HIGH));
     }
 
     @Test
-    void zeroThresholdAlwaysAppliesAction() {
+    void noneThresholdAlwaysAppliesAction() {
         assertEquals(PolicyAction.BLOCK,
-                ModerationMapping.mapVerdict(0.0, PolicyAction.BLOCK, "NONE"));
+                ModerationMapping.mapVerdict(Severity.NONE, PolicyAction.BLOCK, Severity.NONE));
     }
 
     @Test
@@ -47,21 +48,21 @@ class ModerationMappingTest {
         // mapVerdict alone treats unknown severity like NONE; the service overrides
         // unclassified items to FLAG explicitly.
         assertEquals(PolicyAction.ALLOW,
-                ModerationMapping.mapVerdict(0.5, PolicyAction.BLOCK, ModerationMapping.SEVERITY_UNKNOWN));
+                ModerationMapping.mapVerdict(Severity.MODERATE, PolicyAction.BLOCK, Severity.UNKNOWN));
     }
 
     // ---------- grouping & counts ----------
 
-    private static ModerationResultItem item(long id, String verdict, String severity, List<String> categories) {
+    private static ModerationResultItem item(long id, String verdict, Severity severity, List<String> categories) {
         return new ModerationResultItem(id, "ext-" + id, "text " + id, verdict, severity,
                 riskFromSeverity(severity), categories, "reason", 10L, 0.001);
     }
 
     private static final List<ModerationResultItem> ITEMS = List.of(
-            item(1, "ALLOW", "NONE", List.of()),
-            item(2, "BLOCK", "HIGH", List.of("hate_speech", "violence")),
-            item(3, "ALLOW", "LOW", List.of()),
-            item(4, "FLAG", "UNKNOWN", List.of()));
+            item(1, "ALLOW", Severity.NONE, List.of()),
+            item(2, "BLOCK", Severity.HIGH, List.of("hate_speech", "violence")),
+            item(3, "ALLOW", Severity.LOW, List.of()),
+            item(4, "FLAG", Severity.UNKNOWN, List.of()));
 
     @Test
     void groupsByVerdictPreservingOrder() {
@@ -102,10 +103,10 @@ class ModerationMappingTest {
 
     @Test
     void riskFromSeverityIsMonotonic() {
-        assertEquals(0.0, riskFromSeverity("NONE"), EPS);
-        assertEquals(1.0 / 3.0, riskFromSeverity("LOW"), EPS);
-        assertEquals(2.0 / 3.0, riskFromSeverity("MODERATE"), EPS);
-        assertEquals(1.0, riskFromSeverity("HIGH"), EPS);
-        assertEquals(0.0, riskFromSeverity("UNKNOWN"), EPS);
+        assertEquals(0.0, riskFromSeverity(Severity.NONE), EPS);
+        assertEquals(1.0 / 3.0, riskFromSeverity(Severity.LOW), EPS);
+        assertEquals(2.0 / 3.0, riskFromSeverity(Severity.MODERATE), EPS);
+        assertEquals(1.0, riskFromSeverity(Severity.HIGH), EPS);
+        assertEquals(0.0, riskFromSeverity(Severity.UNKNOWN), EPS);
     }
 }
