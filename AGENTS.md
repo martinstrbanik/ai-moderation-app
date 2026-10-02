@@ -15,7 +15,8 @@ models for automated moderation of user-generated content*. It is a Spring Boot
 web application with two main capabilities:
 
 1. **Moderation** — classify user content (currently text) against a configurable
-   **policy** using an LLM and return a verdict (`ALLOW` / `FLAG` / `BLOCK`).
+   **policy** using an LLM and return a verdict (`ALLOW` / `BLOCK`). The user tunes
+   the outcome via the policy's `thresholdSeverity`.
 2. **Benchmark** — run the same classification task over prepared datasets,
    across multiple models, and compute evaluation metrics
    (precision / recall / F1 / accuracy / latency / cost).
@@ -146,14 +147,14 @@ Entities (all in `model/`):
 |--------|-----------|-------|
 | `AiModel` | provider(`openrouter`), `modelId`(unique), name, `type`(TEXT/VISION), enabled | reference catalog; **no** inference params stored (fixed: temperature=0, JSON output) |
 | `ApiKey` | tenantId, provider, `encryptedKey` (AES/GCM), label | BYO key; plaintext never returned |
-| `Policy` | tenantId, name, description, categories(JSON), rules(JSON), `thresholdSeverity`(NONE/LOW/MODERATE/HIGH), `action`(ALLOW/FLAG/BLOCK), modelId, fallbackModelId, active, version | `version` increments on update/activation change; `thresholdSeverity` = minimum severity that triggers `action` |
+| `Policy` | tenantId, name, description, categories(JSON), rules(JSON), `thresholdSeverity`(NONE/LOW/MODERATE/HIGH), modelId, fallbackModelId, active, version | `version` increments on update/activation change; `thresholdSeverity` = minimum severity that triggers a `BLOCK` (there is no configurable action) |
 | `ModerationLog` | tenantId, policy, model, contentType, verdict, `severity`(Severity enum), categories, confidence, latencyMs, `requestId` | audit of each moderation (one row per moderated text); `requestId` groups the rows of one batched request |
 | `Dataset` | name, description, source | reference registry (no tenantId) |
 | `DatasetSample` | dataset, content, imageUrl, expectedLabel | one sample; `expectedLabel` used as ground truth |
 | `BenchmarkRun` | tenantId, dataset, policy(nullable), apiKeyId, level, batchSize, status, published, startedAt, finishedAt | one benchmark run |
 | `BenchmarkResult` | tenantId, run, model, precision, recall, f1, accuracy, avgLatency, cost, errorCount, processedSamples | one row per model per run |
 
-Enums: `ModelType{TEXT,VISION}`, `PolicyAction{ALLOW,FLAG,BLOCK}`,
+Enums: `ModelType{TEXT,VISION}`, `PolicyAction{ALLOW,BLOCK}`,
 `ContentType{TEXT,IMAGE}`, `BenchmarkLevel{EXTRA_LIGHT,LIGHT,FULL}`,
 `RunStatus{PENDING,RUNNING,COMPLETED,FAILED}`, `Severity{NONE,LOW,MODERATE,HIGH,UNKNOWN}`
 (`UNKNOWN` is an app-side sentinel for unclassified texts and is never a valid policy threshold).
@@ -247,7 +248,7 @@ Example request bodies:
 
     POST /api/models          {"modelId":"openai/gpt-4o-mini","name":"GPT-4o mini","type":"TEXT","enabled":true}
     POST /api/api-keys        {"label":"my-key","key":"sk-or-v1-..."}
-    POST /api/policies        {"name":"Hate","description":"...","categories":"[\"hate_speech\"]","rules":"{}","thresholdSeverity":"MODERATE","action":"BLOCK","modelId":3,"fallbackModelId":null,"active":true}
+    POST /api/policies        {"name":"Hate","description":"...","categories":"[\"hate_speech\"]","rules":"{}","thresholdSeverity":"MODERATE","modelId":3,"fallbackModelId":null,"active":true}
     POST /api/benchmarks/runs {"datasetId":1,"policyId":2,"modelIds":[3,8],"level":"EXTRA_LIGHT","apiKeyId":null,"batchSize":10}
     POST /api/moderation      {"policyId":2,"batchSize":10,"items":[{"id":"user-comment-1","text":"text to moderate"},{"id":"user-comment-2","text":"another text"}]}
 
@@ -280,16 +281,16 @@ Endpoint: `POST /api/moderation` — **batched**. Request:
   used to reference texts in the batch prompt and appears in the output.
 - `batchSize` is optional (1..100) → defaults to `automoder.moderation.batch-size` (10).
 
-Response: the moderated texts grouped by verdict (in input order within each list)
-plus request-level metadata:
+Response: the moderated texts grouped by verdict (in input order within each list),
+an `error` list of texts that could not be classified, plus request-level metadata:
 
     {
       "allow": [ {id, externalId, text, verdict, severity, risk, categories, reason, latencyMs, cost}, ... ],
-      "flag":  [ ... ],
       "block": [ ... ],
-      "policyId", "policyName", "thresholdSeverity", "action",
+      "error": [ ... ],   // unclassified: verdict = null, severity = "UNKNOWN"
+      "policyId", "policyName", "thresholdSeverity",
       "modelId", "modelName", "usedFallback",
-      "requestId", "batchSize", "batchCount", "totalItems",
+      "requestId", "batchSize", "batchCount", "totalItems", "errorCount",
       "verdictCounts", "severityCounts", "categoryCounts",
       "latencyMs", "cost", "avgLatencyPerItem", "timestamp"
     }
@@ -311,14 +312,17 @@ Flow (`ModerationService.moderate(policyId, items, batchSize)`):
    (same pattern as the benchmark, §12).
 5. **Verdict mapping** (app-side, per the design decision):
    the model's rated severity is compared against the policy's `thresholdSeverity`
-   (the **minimum** severity that triggers the action): `severity >= thresholdSeverity`
-   → `policy.action`, else `ALLOW` (order NONE=0, LOW=1, MODERATE=2, HIGH=3 via the
-   `Severity` enum). So `thresholdSeverity = MODERATE` triggers on MODERATE/HIGH,
-   `HIGH` only on HIGH, etc. (`UNKNOWN` never triggers via this path.)
-6. **Unclassified texts → `flag`**: when a text could not be classified (batch and
+   (the **minimum** severity that triggers a block): `severity >= thresholdSeverity`
+   → `BLOCK`, else `ALLOW` (order NONE=0, LOW=1, MODERATE=2, HIGH=3 via the
+   `Severity` enum). So `thresholdSeverity = MODERATE` blocks MODERATE/HIGH,
+   `HIGH` only blocks HIGH, etc. (`UNKNOWN` never triggers via this path.) There is
+   no configurable action — a policy always blocks its violations and the user tunes
+   the outcome purely via `thresholdSeverity`.
+6. **Unclassified texts → `error`**: when a text could not be classified (batch and
    individual attempts failed, or missing from the response) it is placed in the
-   `flag` list with `severity="UNKNOWN"`, `risk=0`, and the error in `reason` — FLAG
-   already means "needs human review", so there is no separate error list.
+   `error` list with `verdict=null`, `severity="UNKNOWN"`, `risk=0`, and the error in
+   `reason`. It is not a verdict, so it is not counted in `verdictCounts` (the request
+   `errorCount` gives the total); `severityCounts` still shows it as `UNKNOWN`.
 7. Save one `ModerationLog` row **per text** (carrying `requestId` of the request);
    the log `latencyMs`/`confidence` are the per-item attributed values.
 8. Aggregate (`ModerationMapping` — pure, unit-tested) and return the response.
@@ -399,6 +403,14 @@ Timing reference (single vs batch, cheap model): single ≈ 3.8 s/sample;
   column, so on an existing DB run: `ALTER TABLE policy ALTER COLUMN threshold DROP
   NOT NULL;` (and optionally backfill `threshold_severity` then `DROP COLUMN
   threshold`). Otherwise inserts fail because the old column has no default.
+- **Policy action removal migration**: `Policy.action` (`PolicyAction`) was removed —
+  a policy always `BLOCK`s its violations. `ddl-auto=update` does **not** drop the old
+  NOT NULL `action` column and the entity no longer writes it, so on an existing DB run:
+  `ALTER TABLE policy DROP COLUMN action;`. Otherwise policy inserts fail on the
+  orphaned NOT NULL column. `PolicyAction` is now `{ALLOW, BLOCK}`.
+- **ModerationLog verdict for failed texts**: the `verdict` column is `NOT NULL`, so
+  unclassified texts (which have `verdict = null` in the API response) are logged as
+  the literal string `"ERROR"`.
 - **Shared dev DB + shared JVM ports**: don't assume an empty DB; clean up test
   rows you create. Don't kill processes by name (see §3).
 - **No sudo**: the environment has no passwordless sudo; the toolchain is
@@ -424,9 +436,14 @@ Implemented and verified:
 - **Milestone 4** — moderation v1 (text, severity-based verdict mapping, logging).
 - **Milestone 5** — batched moderation: `POST /api/moderation` takes a list of texts
   (`items[{id,text}]`) + optional `batchSize` and returns them grouped into
-  `allow`/`flag`/`block` lists with request metadata and aggregates; unclassified
-  texts go to `flag` (severity `UNKNOWN`); `ModerationLog.requestId` correlates rows.
-- Tests: `mvn test` green (`AutomodApplicationTests`, `MetricsTest`, `ModerationMappingTest`, `ModerationServiceTest` — 17 tests).
+  `allow`/`block` lists plus an `error` list, with request metadata and aggregates;
+  unclassified texts go to `error` (verdict `null`, severity `UNKNOWN`);
+  `ModerationLog.requestId` correlates rows.
+- **Milestone 6** — fully automatic moderation: the configurable `Policy.action` and
+  the `FLAG` verdict were removed; a violation is always `BLOCK` and the user tunes
+  the outcome via `thresholdSeverity`. The severity prompts no longer mention any
+  action. Failed/unclassified texts are surfaced in an `error` list (`verdict = null`).
+- Tests: `mvn test` green (`AutomodApplicationTests`, `MetricsTest`, `ModerationMappingTest`, `ModerationServiceTest`).
 - Postman collection covers all current endpoints.
 
 Known verification notes: model calls were only exercised with a **fake key**
@@ -461,4 +478,4 @@ OpenRouter key.
 
 ---
 
-_Last substantial update: categorical policy threshold (`Severity` enum) replacing the numeric `threshold`; severity is now the `Severity` enum throughout._
+_Last substantial update: removed the configurable `Policy.action` and the `FLAG` verdict — moderation is fully automatic (`ALLOW`/`BLOCK`, tuned via `thresholdSeverity`); unclassified texts are returned in an `error` list (`verdict = null`). `PolicyAction` is now `{ALLOW, BLOCK}`._

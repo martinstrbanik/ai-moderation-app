@@ -22,29 +22,33 @@ public final class ModerationMapping {
 
     /**
      * Maps a model severity to a verdict using the policy threshold: if the rated
-     * severity is at least {@code threshold} (the minimum severity that triggers the
-     * action) the policy {@code action} is returned, otherwise {@link PolicyAction#ALLOW}.
+     * severity is at least {@code threshold} (the minimum severity that triggers a
+     * block) the verdict is {@link PolicyAction#BLOCK}, otherwise {@link PolicyAction#ALLOW}.
      *
-     * <p>{@link Severity#UNKNOWN} (unclassified) never triggers the action here; the
-     * service places such items in {@code FLAG} explicitly.</p>
+     * <p>{@link Severity#UNKNOWN} (unclassified) never triggers a block here; the
+     * service routes such items to the response {@code error} list explicitly.</p>
      */
-    public static PolicyAction mapVerdict(Severity threshold, PolicyAction action, Severity severity) {
+    public static PolicyAction mapVerdict(Severity threshold, Severity severity) {
         if (severity == null || threshold == null) {
             return PolicyAction.ALLOW;
         }
-        return severity.atLeast(threshold) ? action : PolicyAction.ALLOW;
+        return severity.atLeast(threshold) ? PolicyAction.BLOCK : PolicyAction.ALLOW;
     }
 
     /**
      * Groups results by verdict. The map always contains an (possibly empty) list for
-     * every {@link PolicyAction}, in enum order (ALLOW, FLAG, BLOCK).
+     * every {@link PolicyAction}, in enum order (ALLOW, BLOCK). Items without a verdict
+     * (the {@code error} list) are ignored.
      */
     public static Map<String, List<ModerationResultItem>> groupByVerdict(List<ModerationResultItem> items) {
         Map<String, List<ModerationResultItem>> out = new LinkedHashMap<>();
-        for (PolicyAction action : PolicyAction.values()) {
-            out.put(action.name(), new ArrayList<>());
+        for (PolicyAction verdict : PolicyAction.values()) {
+            out.put(verdict.name(), new ArrayList<>());
         }
         for (ModerationResultItem item : items) {
+            if (item.verdict() == null) {
+                continue;
+            }
             out.computeIfAbsent(item.verdict(), k -> new ArrayList<>()).add(item);
         }
         return out;
@@ -53,10 +57,13 @@ public final class ModerationMapping {
     /** Counts results per verdict; always contains every verdict (0 when absent). */
     public static Map<String, Integer> verdictCounts(List<ModerationResultItem> items) {
         Map<String, Integer> out = new LinkedHashMap<>();
-        for (PolicyAction action : PolicyAction.values()) {
-            out.put(action.name(), 0);
+        for (PolicyAction verdict : PolicyAction.values()) {
+            out.put(verdict.name(), 0);
         }
         for (ModerationResultItem item : items) {
+            if (item.verdict() == null) {
+                continue;
+            }
             out.merge(item.verdict(), 1, Integer::sum);
         }
         return out;

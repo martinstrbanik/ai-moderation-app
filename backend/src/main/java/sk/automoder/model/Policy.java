@@ -42,16 +42,12 @@ public class Policy {
     private String rules;
 
     /**
-     * Minimum severity that triggers {@link #action}. Added nullable to stay
-     * compatible with {@code ddl-auto=update} on a table that already has rows.
+     * Minimum severity that triggers a {@link PolicyAction#BLOCK}. Added nullable to
+     * stay compatible with {@code ddl-auto=update} on a table that already has rows.
      */
     @Enumerated(EnumType.STRING)
     @Column(name = "threshold_severity", length = 16)
     private Severity thresholdSeverity;
-
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 16)
-    private PolicyAction action;
 
     /** FK to the target model. */
     @Column(name = "model_id", nullable = false)
@@ -145,14 +141,6 @@ public class Policy {
 
     public void setThresholdSeverity(Severity thresholdSeverity) {
         this.thresholdSeverity = thresholdSeverity;
-    }
-
-    public PolicyAction getAction() {
-        return action;
-    }
-
-    public void setAction(PolicyAction action) {
-        this.action = action;
     }
 
     public Long getModelId() {

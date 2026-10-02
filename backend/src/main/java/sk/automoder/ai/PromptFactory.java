@@ -23,9 +23,9 @@ public final class PromptFactory {
     /**
      * Severity-based moderation prompt - asks the model to rate severity on
      * a predefined scale (NONE / LOW / MODERATE / HIGH) instead of returning
-     * a final verdict. The application maps severity to the policy action.
+     * a final verdict. The application maps severity to a verdict (BLOCK / ALLOW).
      */
-    public static String severitySystemPrompt(String policyName, List<String> categories, String action) {
+    public static String severitySystemPrompt(String policyName, List<String> categories) {
         return "You are a content moderation assistant for the policy \"" + policyName + "\". "
                 + "Relevant categories: " + (categories.isEmpty() ? "general" : String.join(", ", categories)) + ". "
                 + "Rate the severity of the content on this scale:\n"
@@ -33,7 +33,6 @@ public final class PromptFactory {
                 + "- LOW (mild concern, borderline)\n"
                 + "- MODERATE (clear violation)\n"
                 + "- HIGH (severe violation)\n"
-                + "The policy action for violations is: " + action + ".\n"
                 + "Return ONLY a JSON object with these fields:\n"
                 + "{\"severity\": \"NONE|LOW|MODERATE|HIGH\", \"categories\": [\"...\"], \"reason\": \"...\"}.";
     }
@@ -44,8 +43,7 @@ public final class PromptFactory {
      * objects, one per input text, in exactly the same order. The {@code id} is the
      * 1-based number of the text as produced by {@link #batchUserContent(List)}.
      */
-    public static String severityBatchSystemPrompt(String policyName, List<String> categories,
-                                                   String action) {
+    public static String severityBatchSystemPrompt(String policyName, List<String> categories) {
         return "You are a content moderation assistant for the policy \"" + policyName + "\". "
                 + "Relevant categories: " + (categories.isEmpty() ? "general" : String.join(", ", categories)) + ". "
                 + "The user provides numbered texts. For EVERY text rate its severity on this scale:\n"
@@ -53,7 +51,6 @@ public final class PromptFactory {
                 + "- LOW (mild concern, borderline)\n"
                 + "- MODERATE (clear violation)\n"
                 + "- HIGH (severe violation)\n"
-                + "The policy action for violations is: " + action + ".\n"
                 + "Return ONLY a JSON array of objects, one per input text, in exactly the same order, "
                 + "each object in the form "
                 + "{\"id\": <number from 1>, \"severity\": \"NONE|LOW|MODERATE|HIGH\", "

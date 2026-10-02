@@ -30,13 +30,13 @@ import java.util.UUID;
 
 /**
  * Text moderation: classifies a batch of texts against a policy using the LLM and
- * returns the texts grouped by verdict (ALLOW / FLAG / BLOCK).
+ * returns the texts grouped by verdict (ALLOW / BLOCK) plus an {@code error} list of
+ * texts that could not be classified.
  *
  * <p>Texts are sent to the model in batches of {@code batchSize} (per request or
  * {@code automoder.moderation.batch-size}). If a batch response is unusable the
  * batch is retried with individual calls. Texts that still cannot be classified are
- * placed in the {@code flag} list ({@code severity = "UNKNOWN"}), since FLAG means
- * "needs human review".</p>
+ * placed in the {@code error} list ({@code severity = "UNKNOWN"}, {@code verdict = null}).</p>
  *
  * <p>Per-item {@code latencyMs}/{@code cost} are <b>attributions</b>, not per-text
  * measurements: the whole batch's latency is assigned to each item of the batch and
@@ -78,10 +78,8 @@ public class ModerationService {
         AiModel primaryModel = modelService.requireModel(policy.getModelId());
         List<String> catLabels = parseCategoriesArray(policy.getCategories());
 
-        String singlePrompt = PromptFactory.severitySystemPrompt(
-                policy.getName(), catLabels, policy.getAction().name());
-        String batchPrompt = PromptFactory.severityBatchSystemPrompt(
-                policy.getName(), catLabels, policy.getAction().name());
+        String singlePrompt = PromptFactory.severitySystemPrompt(policy.getName(), catLabels);
+        String batchPrompt = PromptFactory.severityBatchSystemPrompt(policy.getName(), catLabels);
 
         int effectiveBatchSize = Math.max(1, requestBatchSize != null ? requestBatchSize : defaultBatchSize);
         String requestId = UUID.randomUUID().toString();
@@ -98,7 +96,8 @@ public class ModerationService {
         double totalCost = 0;
         boolean usedFallback = false;
         AiModel lastModel = primaryModel;
-        List<ModerationResultItem> results = new ArrayList<>();
+        List<ModerationResultItem> classified = new ArrayList<>();
+        List<ModerationResultItem> errors = new ArrayList<>();
 
         for (List<Target> batch : batches) {
             AiModel model = primaryModel;
@@ -151,22 +150,21 @@ public class ModerationService {
 
             for (Target target : batch) {
                 Parsed p = parsed.get(target.internalId());
-                PolicyAction verdict;
+                boolean classifiedOk = p != null;
                 Severity severity;
                 List<String> categories;
                 String reason;
                 double risk;
-                if (p != null) {
+                PolicyAction verdict = null;
+                if (classifiedOk) {
                     severity = p.severity();
                     categories = p.categories();
                     reason = p.reason();
-                    verdict = ModerationMapping.mapVerdict(
-                            policy.getThresholdSeverity(), policy.getAction(), severity);
+                    verdict = ModerationMapping.mapVerdict(policy.getThresholdSeverity(), severity);
                     risk = ModerationResponse.riskFromSeverity(severity);
                 } else {
                     severity = Severity.UNKNOWN;
                     categories = List.of();
-                    verdict = PolicyAction.FLAG;
                     risk = 0.0;
                     reason = failure != null
                             ? "Classification failed: " + failure
@@ -179,43 +177,53 @@ public class ModerationService {
                 logEntry.setPolicy(policy);
                 logEntry.setModel(model);
                 logEntry.setContentType(ContentType.TEXT);
-                logEntry.setVerdict(verdict.name());
+                // the verdict column is NOT NULL; failed texts are recorded as "ERROR"
+                logEntry.setVerdict(classifiedOk ? verdict.name() : "ERROR");
                 logEntry.setSeverity(severity);
                 logEntry.setCategories(categories.toString());
                 logEntry.setConfidence(risk);
                 logEntry.setLatencyMs(perItemLatency);
                 logRepository.save(logEntry);
 
-                results.add(new ModerationResultItem(
+                ModerationResultItem item = new ModerationResultItem(
                         target.internalId(), target.externalId(), target.text(),
-                        verdict.name(), severity, risk, categories, reason, perItemLatency, perItemCost));
+                        classifiedOk ? verdict.name() : null, severity, risk, categories, reason,
+                        perItemLatency, perItemCost);
+                if (classifiedOk) {
+                    classified.add(item);
+                } else {
+                    errors.add(item);
+                }
             }
         }
 
         long latencyMs = System.currentTimeMillis() - start;
-        Map<String, List<ModerationResultItem>> grouped = ModerationMapping.groupByVerdict(results);
+        Map<String, List<ModerationResultItem>> grouped = ModerationMapping.groupByVerdict(classified);
+        List<ModerationResultItem> all = new ArrayList<>(classified);
+        all.addAll(errors);
+        int totalItems = all.size();
 
         return new ModerationResponse(
                 grouped.get(PolicyAction.ALLOW.name()),
-                grouped.get(PolicyAction.FLAG.name()),
                 grouped.get(PolicyAction.BLOCK.name()),
+                errors,
                 policy.getId(),
                 policy.getName(),
                 policy.getThresholdSeverity(),
-                policy.getAction().name(),
                 lastModel.getId(),
                 lastModel.getModelId(),
                 usedFallback,
                 requestId,
                 effectiveBatchSize,
                 batches.size(),
-                results.size(),
-                ModerationMapping.verdictCounts(results),
-                ModerationMapping.severityCounts(results),
-                ModerationMapping.categoryCounts(results),
+                totalItems,
+                errors.size(),
+                ModerationMapping.verdictCounts(classified),
+                ModerationMapping.severityCounts(all),
+                ModerationMapping.categoryCounts(classified),
                 latencyMs,
                 totalCost,
-                results.isEmpty() ? 0.0 : (double) latencyMs / results.size(),
+                totalItems == 0 ? 0.0 : (double) latencyMs / totalItems,
                 Instant.now());
     }
 

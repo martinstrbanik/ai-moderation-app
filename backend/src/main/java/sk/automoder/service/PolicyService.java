@@ -77,7 +77,6 @@ public class PolicyService {
         policy.setCategories(request.categories());
         policy.setRules(request.rules());
         policy.setThresholdSeverity(request.thresholdSeverity());
-        policy.setAction(request.action());
         policy.setModelId(request.modelId());
         policy.setFallbackModelId(request.fallbackModelId());
         policy.setActive(request.active());

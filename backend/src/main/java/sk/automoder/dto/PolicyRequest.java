@@ -2,7 +2,6 @@ package sk.automoder.dto;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
-import sk.automoder.model.PolicyAction;
 import sk.automoder.model.Severity;
 
 public record PolicyRequest(
@@ -12,7 +11,6 @@ public record PolicyRequest(
         String rules,
         @NotNull(message = "Threshold severity is required (NONE/LOW/MODERATE/HIGH).")
         Severity thresholdSeverity,
-        @NotNull(message = "Action is required (ALLOW/FLAG/BLOCK).") PolicyAction action,
         @NotNull(message = "Target model is required.") Long modelId,
         Long fallbackModelId,
         boolean active

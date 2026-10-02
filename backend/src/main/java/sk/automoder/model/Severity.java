@@ -7,11 +7,12 @@ package sk.automoder.model;
  * <ul>
  *   <li>the model's per-text severity rating, and</li>
  *   <li>the policy threshold ({@code thresholdSeverity}) — the <b>minimum</b> severity
- *       that triggers the policy action.</li>
+ *       that triggers a {@link PolicyAction#BLOCK}.</li>
  * </ul>
  *
  * <p>{@link #UNKNOWN} is an application-side sentinel for a text the model could not
- * classify (such texts become {@code FLAG}). It is <b>never</b> a valid threshold and
+ * classify (such texts are returned in the moderation {@code error} list). It is
+ * <b>never</b> a valid threshold and
  * must not be compared with {@link #atLeast(Severity)} for verdict mapping.</p>
  */
 public enum Severity {

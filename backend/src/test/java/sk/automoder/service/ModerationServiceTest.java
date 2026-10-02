@@ -11,13 +11,13 @@ import sk.automoder.dto.ModerationResponse;
 import sk.automoder.model.AiModel;
 import sk.automoder.model.ModelType;
 import sk.automoder.model.Policy;
-import sk.automoder.model.PolicyAction;
 import sk.automoder.model.Severity;
 import sk.automoder.repository.ModerationLogRepository;
 
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -28,7 +28,7 @@ import static org.mockito.Mockito.when;
 
 /**
  * Unit tests for {@link ModerationService} with mocked dependencies (no DB / no HTTP).
- * Focuses on batching, the batch-relative id mapping and the failure -> FLAG rule.
+ * Focuses on batching, the batch-relative id mapping and the failure -> error list rule.
  */
 class ModerationServiceTest {
 
@@ -59,7 +59,6 @@ class ModerationServiceTest {
         policy.setName("Hate detection");
         policy.setCategories("[\"hate_speech\"]");
         policy.setThresholdSeverity(Severity.MODERATE);
-        policy.setAction(PolicyAction.BLOCK);
         policy.setModelId(3L);
         policy.setActive(true);
 
@@ -100,7 +99,7 @@ class ModerationServiceTest {
                 r.allow().stream().map(ModerationResponse.ModerationResultItem::externalId).toList());
         assertEquals(List.of("b", "c"),
                 r.block().stream().map(ModerationResponse.ModerationResultItem::externalId).toList());
-        assertTrue(r.flag().isEmpty());
+        assertTrue(r.error().isEmpty());
         assertEquals(1, r.verdictCounts().get("ALLOW"));
         assertEquals(2, r.verdictCounts().get("BLOCK"));
         assertEquals(2, r.batchCount());
@@ -124,7 +123,7 @@ class ModerationServiceTest {
                 new ModerationItem("b", "text two")), 2);
 
         assertEquals(2, r.block().size());
-        assertTrue(r.flag().isEmpty());
+        assertTrue(r.error().isEmpty());
     }
 
     @Test
@@ -144,7 +143,7 @@ class ModerationServiceTest {
     }
 
     @Test
-    void fullyFailedBatchIsFlaggedAsUnknown() {
+    void fullyFailedBatchGoesToErrorList() {
         when(client.call(anyString(), anyString(), anyString(), anyString()))
                 .thenThrow(new AiProviderException(400, "Bad Request"));
 
@@ -152,10 +151,12 @@ class ModerationServiceTest {
                 new ModerationItem("a", "text one"),
                 new ModerationItem("b", "text two")), 2);
 
-        assertEquals(2, r.flag().size());
+        assertEquals(2, r.error().size());
+        assertEquals(2, r.errorCount());
         assertTrue(r.allow().isEmpty());
         assertTrue(r.block().isEmpty());
         assertEquals(2, r.severityCounts().get("UNKNOWN"));
-        assertTrue(r.flag().get(0).reason().contains("Classification failed"));
+        assertNull(r.error().get(0).verdict());
+        assertTrue(r.error().get(0).reason().contains("Classification failed"));
     }
 }

@@ -1,7 +1,6 @@
 package sk.automoder.dto;
 
 import sk.automoder.model.Policy;
-import sk.automoder.model.PolicyAction;
 import sk.automoder.model.Severity;
 
 import java.time.Instant;
@@ -14,7 +13,6 @@ public record PolicyResponse(
         String categories,
         String rules,
         Severity thresholdSeverity,
-        PolicyAction action,
         Long modelId,
         Long fallbackModelId,
         boolean active,
@@ -31,7 +29,6 @@ public record PolicyResponse(
                 policy.getCategories(),
                 policy.getRules(),
                 policy.getThresholdSeverity(),
-                policy.getAction(),
                 policy.getModelId(),
                 policy.getFallbackModelId(),
                 policy.isActive(),
