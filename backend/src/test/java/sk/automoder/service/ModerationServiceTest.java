@@ -9,6 +9,7 @@ import sk.automoder.ai.OpenRouterClient;
 import sk.automoder.dto.ModerationRequest.ModerationItem;
 import sk.automoder.dto.ModerationResponse;
 import sk.automoder.model.AiModel;
+import sk.automoder.model.Category;
 import sk.automoder.model.ModelType;
 import sk.automoder.model.Policy;
 import sk.automoder.model.Severity;
@@ -57,7 +58,9 @@ class ModerationServiceTest {
         policy = new Policy();
         policy.setId(2L);
         policy.setName("Hate detection");
-        policy.setCategories("[\"hate_speech\"]");
+        policy.setCategories(List.of(
+                new Category("hate_speech", "Content attacking people based on protected attributes."),
+                new Category("violence", "Content threatening or glorifying physical violence.")));
         policy.setThresholdSeverity(Severity.MODERATE);
         policy.setModelId(3L);
         policy.setActive(true);
@@ -87,8 +90,8 @@ class ModerationServiceTest {
         // batch 1 (2 items): relative ids 1 and 2 ; batch 2 (1 item): single object
         when(client.call(eq("test-key"), eq(PRIMARY_ID), anyString(), anyString()))
                 .thenReturn(ai("[{\"id\":1,\"severity\":\"NONE\",\"categories\":[],\"reason\":\"ok\"},"
-                                + "{\"id\":2,\"severity\":\"HIGH\",\"categories\":[\"violence\"],\"reason\":\"bad\"}]"),
-                        ai("{\"severity\":\"MODERATE\",\"categories\":[\"hate_speech\"],\"reason\":\"meh\"}"));
+                                + "{\"id\":2,\"severity\":\"HIGH\",\"categories\":[2],\"reason\":\"bad\"}]"),
+                        ai("{\"severity\":\"MODERATE\",\"categories\":[1],\"reason\":\"meh\"}"));
 
         ModerationResponse r = service.moderate(2L, List.of(
                 new ModerationItem("a", "text one"),
@@ -100,6 +103,9 @@ class ModerationServiceTest {
         assertEquals(List.of("b", "c"),
                 r.block().stream().map(ModerationResponse.ModerationResultItem::externalId).toList());
         assertTrue(r.error().isEmpty());
+        // model reported category 2 (violence) for "b" and category 1 (hate_speech) for "c"
+        assertEquals(List.of("violence"), r.block().get(0).categories());
+        assertEquals(List.of("hate_speech"), r.block().get(1).categories());
         assertEquals(1, r.verdictCounts().get("ALLOW"));
         assertEquals(2, r.verdictCounts().get("BLOCK"));
         assertEquals(2, r.batchCount());
@@ -115,7 +121,7 @@ class ModerationServiceTest {
             if (user.contains("\n")) {
                 return ai("not valid json"); // batch -> unusable
             }
-            return ai("{\"severity\":\"HIGH\",\"categories\":[\"violence\"],\"reason\":\"bad\"}");
+            return ai("{\"severity\":\"HIGH\",\"categories\":[2],\"reason\":\"bad\"}");
         });
 
         ModerationResponse r = service.moderate(2L, List.of(
@@ -158,5 +164,29 @@ class ModerationServiceTest {
         assertEquals(2, r.severityCounts().get("UNKNOWN"));
         assertNull(r.error().get(0).verdict());
         assertTrue(r.error().get(0).reason().contains("Classification failed"));
+    }
+
+    @Test
+    void inventedCategoryIndicesAreDropped() {
+        // policy has 2 categories; the model reports an out-of-range number (9) together
+        // with a valid one (1). The invented number must be ignored.
+        when(client.call(anyString(), anyString(), anyString(), anyString()))
+                .thenReturn(ai("{\"severity\":\"HIGH\",\"categories\":[9,1],\"reason\":\"mixed\"}"));
+
+        ModerationResponse r = service.moderate(2L, List.of(new ModerationItem("a", "hi")), null);
+
+        assertEquals(1, r.block().size());
+        assertEquals(List.of("hate_speech"), r.block().get(0).categories());
+    }
+
+    @Test
+    void allInventedCategoryIndicesYieldEmptyCategories() {
+        when(client.call(anyString(), anyString(), anyString(), anyString()))
+                .thenReturn(ai("{\"severity\":\"LOW\",\"categories\":[7],\"reason\":\"nope\"}"));
+
+        ModerationResponse r = service.moderate(2L, List.of(new ModerationItem("a", "hi")), null);
+
+        assertEquals(1, r.allow().size());
+        assertTrue(r.allow().get(0).categories().isEmpty());
     }
 }

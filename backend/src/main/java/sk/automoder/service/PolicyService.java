@@ -6,11 +6,15 @@ import sk.automoder.dto.PolicyRequest;
 import sk.automoder.dto.PolicyResponse;
 import sk.automoder.exception.BadRequestException;
 import sk.automoder.exception.NotFoundException;
+import sk.automoder.model.Category;
 import sk.automoder.model.Policy;
 import sk.automoder.model.Severity;
 import sk.automoder.repository.PolicyRepository;
 
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 @Service
 public class PolicyService {
@@ -74,12 +78,37 @@ public class PolicyService {
         }
         policy.setName(request.name());
         policy.setDescription(request.description());
-        policy.setCategories(request.categories());
-        policy.setRules(request.rules());
+        policy.setCategories(validateCategories(request.categories()));
         policy.setThresholdSeverity(request.thresholdSeverity());
         policy.setModelId(request.modelId());
         policy.setFallbackModelId(request.fallbackModelId());
         policy.setActive(request.active());
+    }
+
+    /**
+     * Validates the policy's categories: each must have a non-blank {@code id} (unique)
+     * and a non-blank {@code prompt}. A {@code null} list is normalised to an empty one.
+     */
+    private List<Category> validateCategories(List<Category> categories) {
+        if (categories == null) {
+            return new ArrayList<>();
+        }
+        Set<String> seenIds = new HashSet<>();
+        List<Category> out = new ArrayList<>(categories.size());
+        for (Category category : categories) {
+            if (category == null
+                    || category.id() == null || category.id().isBlank()
+                    || category.prompt() == null || category.prompt().isBlank()) {
+                throw new BadRequestException(
+                        "Each category must have a non-blank 'id' and 'prompt'.");
+            }
+            String id = category.id().trim();
+            if (!seenIds.add(id)) {
+                throw new BadRequestException("Duplicate category id: " + id + ".");
+            }
+            out.add(new Category(id, category.prompt().trim()));
+        }
+        return out;
     }
 
     public Policy requirePolicy(Long id) {

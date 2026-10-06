@@ -1,17 +1,18 @@
 package sk.automoder.dto;
 
+import sk.automoder.model.Category;
 import sk.automoder.model.Policy;
 import sk.automoder.model.Severity;
 
 import java.time.Instant;
+import java.util.List;
 
 public record PolicyResponse(
         Long id,
         String tenantId,
         String name,
         String description,
-        String categories,
-        String rules,
+        List<Category> categories,
         Severity thresholdSeverity,
         Long modelId,
         Long fallbackModelId,
@@ -27,7 +28,6 @@ public record PolicyResponse(
                 policy.getName(),
                 policy.getDescription(),
                 policy.getCategories(),
-                policy.getRules(),
                 policy.getThresholdSeverity(),
                 policy.getModelId(),
                 policy.getFallbackModelId(),

@@ -14,6 +14,7 @@ import sk.automoder.dto.ModerationResponse;
 import sk.automoder.dto.ModerationResponse.ModerationResultItem;
 import sk.automoder.exception.BadRequestException;
 import sk.automoder.model.AiModel;
+import sk.automoder.model.Category;
 import sk.automoder.model.ContentType;
 import sk.automoder.model.ModerationLog;
 import sk.automoder.model.Policy;
@@ -24,8 +25,10 @@ import sk.automoder.repository.ModerationLogRepository;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -76,10 +79,10 @@ public class ModerationService {
 
         String apiKey = apiKeyService.resolveDefaultPlainKey();
         AiModel primaryModel = modelService.requireModel(policy.getModelId());
-        List<String> catLabels = parseCategoriesArray(policy.getCategories());
+        List<Category> policyCategories = policy.getCategories() == null ? List.of() : policy.getCategories();
 
-        String singlePrompt = PromptFactory.severitySystemPrompt(policy.getName(), catLabels);
-        String batchPrompt = PromptFactory.severityBatchSystemPrompt(policy.getName(), catLabels);
+        String singlePrompt = PromptFactory.severitySystemPrompt(policyCategories);
+        String batchPrompt = PromptFactory.severityBatchSystemPrompt(policyCategories);
 
         int effectiveBatchSize = Math.max(1, requestBatchSize != null ? requestBatchSize : defaultBatchSize);
         String requestId = UUID.randomUUID().toString();
@@ -126,7 +129,7 @@ public class ModerationService {
             if (ai != null) {
                 batchLatency += ai.latencyMs();
                 batchCost += ai.costUsd();
-                parsed = parseResponse(ai.content(), batch);
+                parsed = parseResponse(ai.content(), batch, policyCategories);
                 // whole-batch response unusable -> retry this batch with individual calls
                 if (parsed.isEmpty() && batch.size() > 1) {
                     for (Target target : batch) {
@@ -135,7 +138,7 @@ public class ModerationService {
                                     apiKey, model.getModelId(), singlePrompt, target.text());
                             batchLatency += one.latencyMs();
                             batchCost += one.costUsd();
-                            parsed.putAll(parseResponse(one.content(), List.of(target)));
+                            parsed.putAll(parseResponse(one.content(), List.of(target), policyCategories));
                         } catch (AiProviderException e) {
                             // leave unclassified - handled below
                         }
@@ -243,7 +246,7 @@ public class ModerationService {
      * (batch) or a single JSON object (single call). Invalid/unparseable content yields
      * an empty map so the caller can trigger the fallback.
      */
-    private Map<Long, Parsed> parseResponse(String content, List<Target> batch) {
+    private Map<Long, Parsed> parseResponse(String content, List<Target> batch, List<Category> categories) {
         Map<Long, Parsed> out = new LinkedHashMap<>();
         if (content == null) {
             return out;
@@ -256,11 +259,11 @@ public class ModerationService {
                 for (JsonNode node : root) {
                     int relativeId = node.path("id").asInt(-1);
                     if (relativeId >= 1 && relativeId <= batch.size()) {
-                        out.put(batch.get(relativeId - 1).internalId(), toParsed(node));
+                        out.put(batch.get(relativeId - 1).internalId(), toParsed(node, categories));
                     }
                 }
             } else if (root.isObject() && batch.size() == 1) {
-                out.put(batch.get(0).internalId(), toParsed(root));
+                out.put(batch.get(0).internalId(), toParsed(root, categories));
             }
         } catch (Exception e) {
             return new LinkedHashMap<>();
@@ -268,10 +271,10 @@ public class ModerationService {
         return out;
     }
 
-    private Parsed toParsed(JsonNode node) {
+    private Parsed toParsed(JsonNode node, List<Category> categories) {
         return new Parsed(
                 parseSeverity(node.path("severity").asText("NONE")),
-                parseCategoriesArray(node.path("categories")),
+                matchCategoryIds(node.path("categories"), categories),
                 node.path("reason").asText(""));
     }
 
@@ -295,28 +298,24 @@ public class ModerationService {
         return out;
     }
 
-    private List<String> parseCategoriesArray(JsonNode categoriesNode) {
-        List<String> result = new ArrayList<>();
-        if (categoriesNode != null && categoriesNode.isArray()) {
-            for (JsonNode c : categoriesNode) {
-                if (c.isTextual()) {
-                    result.add(c.asText());
-                }
+    /**
+     * Maps the model's reported category numbers to policy category ids. The model is
+     * given the categories as a numbered list and returns the 1-based numbers of the ones
+     * it matched; any number outside {@code 1..categories.size()} (i.e. an invented
+     * category) is ignored. Ids are returned in the model's order, de-duplicated.
+     */
+    private List<String> matchCategoryIds(JsonNode categoriesNode, List<Category> categories) {
+        Set<String> ids = new LinkedHashSet<>();
+        if (categoriesNode == null || !categoriesNode.isArray()) {
+            return List.of();
+        }
+        for (JsonNode c : categoriesNode) {
+            int number = c.asInt(-1);
+            if (number >= 1 && number <= categories.size()) {
+                ids.add(categories.get(number - 1).id());
             }
         }
-        return result;
-    }
-
-    private List<String> parseCategoriesArray(String categoriesJson) {
-        if (categoriesJson == null || categoriesJson.isBlank()) {
-            return List.of();
-        }
-        try {
-            JsonNode arr = objectMapper.readTree(categoriesJson);
-            return parseCategoriesArray(arr);
-        } catch (Exception e) {
-            return List.of();
-        }
+        return new ArrayList<>(ids);
     }
 
     /** An input text plus the application-assigned internal id. */

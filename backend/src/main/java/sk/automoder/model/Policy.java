@@ -1,6 +1,7 @@
 package sk.automoder.model;
 
 import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -12,9 +13,10 @@ import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 
 import java.time.Instant;
+import java.util.List;
 
 /**
- * Moderation policy - defines rules and the target model for content review.
+ * Moderation policy - defines categories and the target model for content review.
  */
 @Entity
 @Table(name = "policy")
@@ -33,13 +35,13 @@ public class Policy {
     @Column(columnDefinition = "text")
     private String description;
 
-    /** JSON array of categories (hate speech, violence, ...). */
+    /**
+     * Categories the policy looks for, each a {@link Category} mini-prompt. Stored as
+     * a JSON array in a {@code text} column via {@link CategoryListConverter}.
+     */
+    @Convert(converter = CategoryListConverter.class)
     @Column(columnDefinition = "text")
-    private String categories;
-
-    /** JSON with rules (blacklist, regex, ...). */
-    @Column(columnDefinition = "text")
-    private String rules;
+    private List<Category> categories;
 
     /**
      * Minimum severity that triggers a {@link PolicyAction#BLOCK}. Added nullable to
@@ -119,20 +121,12 @@ public class Policy {
         this.description = description;
     }
 
-    public String getCategories() {
+    public List<Category> getCategories() {
         return categories;
     }
 
-    public void setCategories(String categories) {
+    public void setCategories(List<Category> categories) {
         this.categories = categories;
-    }
-
-    public String getRules() {
-        return rules;
-    }
-
-    public void setRules(String rules) {
-        this.rules = rules;
     }
 
     public Severity getThresholdSeverity() {

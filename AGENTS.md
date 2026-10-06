@@ -124,7 +124,7 @@ Base package: `sk.automoder` (`backend/src/main/java/sk/automoder/`).
 | `controller/` | REST controllers (see §9) |
 | `dto/` | Request/response records |
 | `exception/` | `ApiException` (+ NotFound/Conflict/BadRequest), `ApiError`, `GlobalExceptionHandler` |
-| `model/` | JPA entities + enums |
+| `model/` | JPA entities + enums; `Category` (value type) + `CategoryListConverter` (JSON ⇄ `List<Category>`) |
 | `repository/` | Spring Data JPA repositories |
 | `security/` | `AesGcmEncryptor` (AES/GCM for API keys) |
 | `service/` | Business logic (see below) |
@@ -147,12 +147,21 @@ Entities (all in `model/`):
 |--------|-----------|-------|
 | `AiModel` | provider(`openrouter`), `modelId`(unique), name, `type`(TEXT/VISION), enabled | reference catalog; **no** inference params stored (fixed: temperature=0, JSON output) |
 | `ApiKey` | tenantId, provider, `encryptedKey` (AES/GCM), label | BYO key; plaintext never returned |
-| `Policy` | tenantId, name, description, categories(JSON), rules(JSON), `thresholdSeverity`(NONE/LOW/MODERATE/HIGH), modelId, fallbackModelId, active, version | `version` increments on update/activation change; `thresholdSeverity` = minimum severity that triggers a `BLOCK` (there is no configurable action) |
+| `Policy` | tenantId, name, description, categories(`List<Category>` JSON), `thresholdSeverity`(NONE/LOW/MODERATE/HIGH), modelId, fallbackModelId, active, version | `version` increments on update/activation change; `thresholdSeverity` = minimum severity that triggers a `BLOCK` (there is no configurable action); each `Category` is `{id, prompt}` (see below) |
 | `ModerationLog` | tenantId, policy, model, contentType, verdict, `severity`(Severity enum), categories, confidence, latencyMs, `requestId` | audit of each moderation (one row per moderated text); `requestId` groups the rows of one batched request |
 | `Dataset` | name, description, source | reference registry (no tenantId) |
 | `DatasetSample` | dataset, content, imageUrl, expectedLabel | one sample; `expectedLabel` used as ground truth |
 | `BenchmarkRun` | tenantId, dataset, policy(nullable), apiKeyId, level, batchSize, status, published, startedAt, finishedAt | one benchmark run |
 | `BenchmarkResult` | tenantId, run, model, precision, recall, f1, accuracy, avgLatency, cost, errorCount, processedSamples | one row per model per run |
+
+**Categories (`model.Category`):** a policy's categories are a `List<Category>` where each
+`Category` is `{id, prompt}`. The `prompt` is a **mini-prompt** describing what the category
+covers (the only part shown to the model); the `id` is a short, unique, machine-safe slug used
+purely for reference/matching/logging. The list is stored as a JSON array in the `policy.categories`
+`text` column via `CategoryListConverter` (an `AttributeConverter`), so the service layer works with
+typed objects and never parses JSON. The converter also reads the **legacy** bare-string format
+(`["hate_speech"]` → `id = prompt = "hate_speech"`), so pre-existing rows keep working with no
+migration. `PolicyService.validateCategories` rejects blank/duplicate `id`s and blank `prompt`s.
 
 Enums: `ModelType{TEXT,VISION}`, `PolicyAction{ALLOW,BLOCK}`,
 `ContentType{TEXT,IMAGE}`, `BenchmarkLevel{EXTRA_LIGHT,LIGHT,FULL}`,
@@ -248,7 +257,7 @@ Example request bodies:
 
     POST /api/models          {"modelId":"openai/gpt-4o-mini","name":"GPT-4o mini","type":"TEXT","enabled":true}
     POST /api/api-keys        {"label":"my-key","key":"sk-or-v1-..."}
-    POST /api/policies        {"name":"Hate","description":"...","categories":"[\"hate_speech\"]","rules":"{}","thresholdSeverity":"MODERATE","modelId":3,"fallbackModelId":null,"active":true}
+    POST /api/policies        {"name":"Hate","description":"...","categories":[{"id":"hate_speech","prompt":"Content attacking people based on protected attributes."},{"id":"violence","prompt":"Content threatening or glorifying physical violence."}],"thresholdSeverity":"MODERATE","modelId":3,"fallbackModelId":null,"active":true}
     POST /api/benchmarks/runs {"datasetId":1,"policyId":2,"modelIds":[3,8],"level":"EXTRA_LIGHT","apiKeyId":null,"batchSize":10}
     POST /api/moderation      {"policyId":2,"batchSize":10,"items":[{"id":"user-comment-1","text":"text to moderate"},{"id":"user-comment-2","text":"another text"}]}
 
@@ -300,12 +309,18 @@ Flow (`ModerationService.moderate(policyId, items, batchSize)`):
 1. Load policy, require `active=true` (else 400).
 2. Resolve BYO key (`ApiKeyService.resolveDefaultPlainKey()`, else 400).
 3. Build **severity prompts**: single (`PromptFactory.severitySystemPrompt`) and
-   batch (`PromptFactory.severityBatchSystemPrompt`). The model rates severity as
-   `NONE|LOW|MODERATE|HIGH`; the batch variant returns a JSON array
-   `[{"id": n, "severity": "...", "categories": [...], "reason": "..."}]` in input order.
+   batch (`PromptFactory.severityBatchSystemPrompt`). Categories are given to the
+   model as a **numbered list of mini-prompts** (`prompt` only — the `id` is never
+   shown to the model). The model rates severity as `NONE|LOW|MODERATE|HIGH` and, in
+   `categories`, returns the **1-based numbers** of the categories it matched (empty
+   array if none). The batch variant returns a JSON array
+   `[{"id": n, "severity": "...", "categories": [1,2], "reason": "..."}]` in input order.
    **`id` in that array is batch-relative (1..batchSize)**, because
    `PromptFactory.batchUserContent` numbers texts from 1 within each batch — the
    parser maps it back to the batch position (not the global internal id).
+   The returned category **numbers are mapped back to the policy category `id`s and
+   filtered to `1..N`**, so the model can never introduce a category that the policy
+   did not define (out-of-range numbers are dropped).
 4. Split items into batches of `batchSize`; one call per batch. On
    `AiProviderException` retry the batch with `fallbackModelId` (`usedFallback=true`);
    if the batch response is unusable, **fall back to individual calls** for that batch
@@ -337,8 +352,7 @@ cross-model consistent; the final verdict is what gets measured. Batching reduce
 HTTP calls and repeated prompt cost.
 
 Not implemented yet: image/vision moderation (would need a multimodal
-`OpenRouterClient` call), `rules` pre-filter (blacklist/regex), and the
-`/api/moderation/logs` read endpoint.
+`OpenRouterClient` call) and the `/api/moderation/logs` read endpoint.
 
 ---
 
@@ -408,6 +422,12 @@ Timing reference (single vs batch, cheap model): single ≈ 3.8 s/sample;
   NOT NULL `action` column and the entity no longer writes it, so on an existing DB run:
   `ALTER TABLE policy DROP COLUMN action;`. Otherwise policy inserts fail on the
   orphaned NOT NULL column. `PolicyAction` is now `{ALLOW, BLOCK}`.
+- **Policy rules field removal**: `Policy.rules` (`String`) was removed — it was never
+  read by moderation or benchmark (a placeholder for the planned rules pre-filter, see
+  §16). `ddl-auto=update` does **not** drop the old (nullable) `rules` column, so on an
+  existing DB it stays as a harmless orphan; drop it manually with
+  `ALTER TABLE policy DROP COLUMN rules;` if you want a clean schema. It was also removed
+  from `PolicyRequest`/`PolicyResponse`, so clients must no longer send it.
 - **ModerationLog verdict for failed texts**: the `verdict` column is `NOT NULL`, so
   unclassified texts (which have `verdict = null` in the API response) are logged as
   the literal string `"ERROR"`.
@@ -418,8 +438,15 @@ Timing reference (single vs batch, cheap model): single ≈ 3.8 s/sample;
   (not in the `docker` group), hence the system PostgreSQL is used and
   `docker-compose.yml` is unused.
 - **`docker-compose.yml`** exists but is not used at runtime.
-- Model `modelId` must be a valid OpenRouter slug; free models (`:free`) are much
+- **Model `modelId`** must be a valid OpenRouter slug; free models (`:free`) are much
   slower and may not support `response_format=json_object`.
+- **Policy categories are typed objects now**: `Policy.categories` changed from a JSON
+  string to `List<Category>` (`{id, prompt}`) via `CategoryListConverter`. The `text`
+  column keeps its name, so **no migration is needed**; the converter still reads the
+  legacy `["hate_speech"]` array-of-strings form. The moderation prompt shows only the
+  `prompt` (numbering each category) and the model replies with category **numbers**
+  (`1..N`), which are mapped back to `id`s and filtered — the model can never invent a
+  category. `PolicyRequest`/`PolicyResponse.categories` are now arrays of `{id, prompt}`.
 
 ---
 
@@ -443,7 +470,13 @@ Implemented and verified:
   the `FLAG` verdict were removed; a violation is always `BLOCK` and the user tunes
   the outcome via `thresholdSeverity`. The severity prompts no longer mention any
   action. Failed/unclassified texts are surfaced in an `error` list (`verdict = null`).
-- Tests: `mvn test` green (`AutomodApplicationTests`, `MetricsTest`, `ModerationMappingTest`, `ModerationServiceTest`).
+- **Milestone 7** — policy categories refactored into typed `{id, prompt}` **mini-prompt**
+  objects (`model.Category` + `CategoryListConverter`, no DB migration). The moderation
+  prompt presents categories as a numbered list of prompts and the model reports the hit
+  categories by **1-based number**, which the app maps back to the policy `id`s and filters
+  to the input set (invented categories are dropped). `Policy{Request,Response}.categories`
+  are arrays of `{id, prompt}`; `PolicyService` validates them (non-blank/unique `id`, non-blank `prompt`).
+- Tests: `mvn test` green (`AutomodApplicationTests`, `MetricsTest`, `ModerationMappingTest`, `ModerationServiceTest`, `CategoryListConverterTest`).
 - Postman collection covers all current endpoints.
 
 Known verification notes: model calls were only exercised with a **fake key**
@@ -456,8 +489,9 @@ OpenRouter key.
 
 1. **Vision moderation** — image input (`imageUrl` / `imageBase64`) via multimodal
    OpenRouter call; extend `ModerationRequest`/`ModerationResponse`.
-2. **Rules pre-filter** — blacklist/regex from `Policy.rules` evaluated before the
-   model call (fast deterministic BLOCK).
+2. **Rules pre-filter** — blacklist/regex evaluated before the model call (fast
+   deterministic BLOCK); would need a new field on `Policy` (the old unused `rules`
+   field was removed).
 3. **Moderation logs read API** — `GET /api/moderation/logs` (filterable).
 4. **Dashboard** — summaries/graphs of moderations + benchmark comparisons.
 5. **Published (pre-prepared) benchmark results** — `published` flag already exists.
@@ -478,4 +512,4 @@ OpenRouter key.
 
 ---
 
-_Last substantial update: removed the configurable `Policy.action` and the `FLAG` verdict — moderation is fully automatic (`ALLOW`/`BLOCK`, tuned via `thresholdSeverity`); unclassified texts are returned in an `error` list (`verdict = null`). `PolicyAction` is now `{ALLOW, BLOCK}`._
+_Last substantial update: removed the unused `Policy.rules` field (never read by moderation/benchmark; it was a placeholder for the planned rules pre-filter) from the entity and the policy DTOs. Prior update: removed the configurable `Policy.action` and the `FLAG` verdict — moderation is fully automatic (`ALLOW`/`BLOCK`, tuned via `thresholdSeverity`); unclassified texts are returned in an `error` list (`verdict = null`). `PolicyAction` is now `{ALLOW, BLOCK}`._

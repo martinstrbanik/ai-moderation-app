@@ -296,7 +296,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"name\": \"Toxicita\",\n    \"description\": \"Blocking toxic content\",\n    \"categories\": \"[\\\"hate_speech\\\"]\",\n    \"rules\": \"{}\",\n    \"thresholdSeverity\": \"MODERATE\",\n    \"modelId\": 1,\n    \"fallbackModelId\": null,\n    \"active\": true\n}"
+              "raw": "{\n    \"name\": \"Toxicita\",\n    \"description\": \"Blocking toxic content\",\n    \"categories\": [{\"id\":\"hate_speech\",\"prompt\":\"Attacks or dehumanizes people based on protected attributes.\"}],\n    \"thresholdSeverity\": \"MODERATE\",\n    \"modelId\": 1,\n    \"fallbackModelId\": null,\n    \"active\": true\n}"
             }
           }
         },
@@ -323,7 +323,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"name\": \"Toxicita\",\n    \"description\": \"Updated policy\",\n    \"categories\": \"[\\\"hate_speech\\\"]\",\n    \"rules\": \"{}\",\n    \"thresholdSeverity\": \"HIGH\",\n    \"modelId\": 1,\n    \"fallbackModelId\": null,\n    \"active\": true\n}"
+              "raw": "{\n    \"name\": \"Toxicita\",\n    \"description\": \"Updated policy\",\n    \"categories\": [{\"id\":\"hate_speech\",\"prompt\":\"Attacks or dehumanizes people based on protected attributes.\"}],\n    \"thresholdSeverity\": \"HIGH\",\n    \"modelId\": 1,\n    \"fallbackModelId\": null,\n    \"active\": true\n}"
             }
           }
         },
