@@ -164,7 +164,7 @@ typed objects and never parses JSON. The converter also reads the **legacy** bar
 migration. `PolicyService.validateCategories` rejects blank/duplicate `id`s and blank `prompt`s.
 
 Enums: `ModelType{TEXT,VISION}`, `PolicyAction{ALLOW,BLOCK}`,
-`ContentType{TEXT,IMAGE}`, `BenchmarkLevel{EXTRA_LIGHT,LIGHT,FULL}`,
+`ContentType{TEXT,IMAGE}`, `BenchmarkLevel{DEBUG,EXTRA_LIGHT,LIGHT,FULL}`,
 `RunStatus{PENDING,RUNNING,COMPLETED,FAILED}`, `Severity{NONE,LOW,MODERATE,HIGH,UNKNOWN}`
 (`UNKNOWN` is an app-side sentinel for unclassified texts and is never a valid policy threshold).
 
@@ -367,9 +367,11 @@ default for that run.
 Execution (`BenchmarkExecutor`, runs on the `benchmarkTaskExecutor` pool):
 
 - Status transitions `PENDING → RUNNING → COMPLETED | FAILED`.
-- Sample selection per level, **balanced per class**: `EXTRA_LIGHT` = 50/class,
-  `LIGHT` = 500/class, `FULL` = all samples. Order is shuffled deterministically
-  by run id.
+- Sample selection per level, **balanced per class**: `DEBUG` = 10/class,
+  `EXTRA_LIGHT` = 50/class, `LIGHT` = 500/class, `FULL` = all samples. Levels are
+  self-describing: each `BenchmarkLevel` carries its `samplesPerClass` (via
+  `getSamplesPerClass()`; `FULL` = `Integer.MAX_VALUE`), so `selectSamples` has no
+  `switch`. Order is shuffled deterministically by run id.
 - **Batching**: samples are grouped into batches of `batchSize` (default 10) and
   sent as one request (`PromptFactory.classificationBatchSystemPrompt`), expecting
   a JSON array `[{"id": n, "label": "..."}]` in input order. If the batch
@@ -512,4 +514,4 @@ OpenRouter key.
 
 ---
 
-_Last substantial update: removed the unused `Policy.rules` field (never read by moderation/benchmark; it was a placeholder for the planned rules pre-filter) from the entity and the policy DTOs. Prior update: removed the configurable `Policy.action` and the `FLAG` verdict — moderation is fully automatic (`ALLOW`/`BLOCK`, tuned via `thresholdSeverity`); unclassified texts are returned in an `error` list (`verdict = null`). `PolicyAction` is now `{ALLOW, BLOCK}`._
+_Last substantial update: made `BenchmarkLevel` self-describing — each level now carries its `samplesPerClass` (`getSamplesPerClass()`; `DEBUG` = 10/class added, `FULL` = `Integer.MAX_VALUE`), so `BenchmarkExecutor.selectSamples` no longer needs a `switch`. Prior update: removed the unused `Policy.rules` field (never read by moderation/benchmark; it was a placeholder for the planned rules pre-filter) from the entity and the policy DTOs. Prior update: removed the configurable `Policy.action` and the `FLAG` verdict — moderation is fully automatic (`ALLOW`/`BLOCK`, tuned via `thresholdSeverity`); unclassified texts are returned in an `error` list (`verdict = null`). `PolicyAction` is now `{ALLOW, BLOCK}`._

@@ -10,7 +10,7 @@ public record CreateBenchmarkRequest(
         @NotNull(message = "datasetId is required.") Long datasetId,
         Long policyId,
         @NotEmpty(message = "At least one model is required.") List<@NotNull Long> modelIds,
-        @NotNull(message = "Benchmark level is required (EXTRA_LIGHT/LIGHT/FULL).") BenchmarkLevel level,
+        @NotNull(message = "Benchmark level is required (DEBUG/EXTRA_LIGHT/LIGHT/FULL).") BenchmarkLevel level,
         Long apiKeyId,
         Integer batchSize
 ) {

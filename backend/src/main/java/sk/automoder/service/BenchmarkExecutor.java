@@ -275,11 +275,7 @@ public class BenchmarkExecutor {
     }
 
     private List<DatasetSample> selectSamples(List<DatasetSample> all, BenchmarkLevel level, long seed) {
-        int perClass = switch (level) {
-            case EXTRA_LIGHT -> 50;
-            case LIGHT -> 500;
-            case FULL -> Integer.MAX_VALUE;
-        };
+        int perClass = level.getSamplesPerClass();
         Map<String, List<DatasetSample>> byLabel = new LinkedHashMap<>();
         for (DatasetSample s : all) {
             byLabel.computeIfAbsent(s.getExpectedLabel(), k -> new ArrayList<>()).add(s);
