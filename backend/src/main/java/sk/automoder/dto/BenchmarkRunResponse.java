@@ -1,6 +1,7 @@
 package sk.automoder.dto;
 
 import sk.automoder.model.BenchmarkLevel;
+import sk.automoder.model.BenchmarkMode;
 import sk.automoder.model.BenchmarkResult;
 import sk.automoder.model.BenchmarkRun;
 import sk.automoder.model.RunStatus;
@@ -15,6 +16,7 @@ public record BenchmarkRunResponse(
         Long policyId,
         String policyName,
         Long apiKeyId,
+        BenchmarkMode mode,
         BenchmarkLevel level,
         Integer batchSize,
         RunStatus status,
@@ -31,6 +33,7 @@ public record BenchmarkRunResponse(
                 run.getPolicy() == null ? null : run.getPolicy().getId(),
                 run.getPolicy() == null ? null : run.getPolicy().getName(),
                 run.getApiKeyId(),
+                run.getMode() == null ? BenchmarkMode.CLASSIFICATION : run.getMode(),
                 run.getLevel(),
                 run.getBatchSize(),
                 run.getStatus(),

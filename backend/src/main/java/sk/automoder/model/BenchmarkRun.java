@@ -40,6 +40,15 @@ public class BenchmarkRun {
     @Column(name = "api_key_id")
     private Long apiKeyId;
 
+    /**
+     * What the run measures. Added nullable (defaulting to {@link BenchmarkMode#CLASSIFICATION}
+     * when null) to stay compatible with {@code ddl-auto=update} on a table that already
+     * has rows.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(length = 16)
+    private BenchmarkMode mode = BenchmarkMode.CLASSIFICATION;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 16)
     private BenchmarkLevel level;
@@ -101,6 +110,14 @@ public class BenchmarkRun {
 
     public void setApiKeyId(Long apiKeyId) {
         this.apiKeyId = apiKeyId;
+    }
+
+    public BenchmarkMode getMode() {
+        return mode;
+    }
+
+    public void setMode(BenchmarkMode mode) {
+        this.mode = mode;
     }
 
     public BenchmarkLevel getLevel() {

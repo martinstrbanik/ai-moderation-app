@@ -488,6 +488,34 @@
               ]
             }
           }
+        },
+        {
+          "name": "Set label verdicts",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/datasets/{{datasetId}}/label-verdicts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "datasets",
+                "{{datasetId}}",
+                "label-verdicts"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"labelVerdicts\": [\n        { \"label\": \"hate\", \"verdict\": \"BLOCK\" },\n        { \"label\": \"not_hate\", \"verdict\": \"ALLOW\" }\n    ]\n}"
+            }
+          }
         }
       ]
     },
@@ -535,7 +563,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"datasetId\": 1,\n    \"policyId\": 1,\n    \"modelIds\": [3],\n    \"level\": \"EXTRA_LIGHT\",\n    \"apiKeyId\": 1,\n    \"batchSize\": 10\n}"
+              "raw": "{\n    \"datasetId\": 1,\n    \"policyId\": 1,\n    \"mode\": \"CLASSIFICATION\",\n    \"modelIds\": [3],\n    \"level\": \"EXTRA_LIGHT\",\n    \"apiKeyId\": 1,\n    \"batchSize\": 10\n}"
             }
           }
         },

@@ -1,6 +1,7 @@
 package sk.automoder.model;
 
 import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
@@ -9,6 +10,8 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+
+import java.util.Map;
 
 /**
  * Result of a benchmark run for a single model (metrics).
@@ -51,6 +54,18 @@ public class BenchmarkResult {
     /** Number of samples already classified (progress indicator, updated incrementally). */
     @Column(name = "processed_samples")
     private Integer processedSamples;
+
+    /**
+     * Moderation benchmark only: the verdict metrics for every severity threshold
+     * (the threshold sweep), derived from the same severity ratings at no extra
+     * model cost. Stored as a JSON object in a {@code text} column via
+     * {@link ThresholdMetricsConverter}. The scalar columns above hold the
+     * <b>classification</b> metrics; a moderation run has no single operating point, so
+     * it leaves them {@code null} and reports the whole sweep here instead.
+     */
+    @Convert(converter = ThresholdMetricsConverter.class)
+    @Column(name = "threshold_metrics", columnDefinition = "text")
+    private Map<Severity, MetricScores> thresholdMetrics;
 
     // ---------- getters & setters ----------
 
@@ -148,5 +163,13 @@ public class BenchmarkResult {
 
     public void setProcessedSamples(Integer processedSamples) {
         this.processedSamples = processedSamples;
+    }
+
+    public Map<Severity, MetricScores> getThresholdMetrics() {
+        return thresholdMetrics;
+    }
+
+    public void setThresholdMetrics(Map<Severity, MetricScores> thresholdMetrics) {
+        this.thresholdMetrics = thresholdMetrics;
     }
 }

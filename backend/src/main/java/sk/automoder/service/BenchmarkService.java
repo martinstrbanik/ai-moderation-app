@@ -5,8 +5,10 @@ import org.springframework.transaction.annotation.Transactional;
 import sk.automoder.dto.BenchmarkResultResponse;
 import sk.automoder.dto.BenchmarkRunResponse;
 import sk.automoder.dto.CreateBenchmarkRequest;
+import sk.automoder.exception.BadRequestException;
 import sk.automoder.exception.NotFoundException;
 import sk.automoder.model.AiModel;
+import sk.automoder.model.BenchmarkMode;
 import sk.automoder.model.BenchmarkResult;
 import sk.automoder.model.BenchmarkRun;
 import sk.automoder.model.Dataset;
@@ -49,12 +51,17 @@ public class BenchmarkService {
         if (request.policyId() != null) {
             policy = policyService.requirePolicy(request.policyId());
         }
+        BenchmarkMode mode = request.mode() == null ? BenchmarkMode.CLASSIFICATION : request.mode();
+        if (mode == BenchmarkMode.MODERATION) {
+            requireModerationPrerequisites(dataset);
+        }
         List<AiModel> models = request.modelIds().stream().map(modelService::requireModel).toList();
 
         BenchmarkRun run = new BenchmarkRun();
         run.setTenantId(PolicyService.DEFAULT_TENANT);
         run.setDataset(dataset);
         run.setPolicy(policy);
+        run.setMode(mode);
         run.setLevel(request.level());
         run.setBatchSize(request.batchSize());
         run.setApiKeyId(request.apiKeyId());
@@ -72,6 +79,20 @@ public class BenchmarkService {
 
         benchmarkExecutor.execute(run.getId());
         return BenchmarkRunResponse.from(run, List.of());
+    }
+
+    /**
+     * A moderation benchmark needs a complete dataset label -&gt; verdict mapping: it derives
+     * both the severity prompt's categories and the expected verdicts from the dataset.
+     * Fails fast with 400 otherwise. A policy is not used.
+     */
+    private void requireModerationPrerequisites(Dataset dataset) {
+        List<String> missing = datasetService.missingVerdictLabels(dataset);
+        if (!missing.isEmpty()) {
+            throw new BadRequestException("Dataset '" + dataset.getName()
+                    + "' is missing ALLOW/BLOCK mappings for labels: " + missing
+                    + ". Set them via PUT /api/datasets/" + dataset.getId() + "/label-verdicts.");
+        }
     }
 
     @Transactional(readOnly = true)

@@ -5,9 +5,12 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import sk.automoder.exception.BadRequestException;
 import sk.automoder.exception.NotFoundException;
 import sk.automoder.model.Dataset;
 import sk.automoder.model.DatasetSample;
+import sk.automoder.model.LabelRule;
+import sk.automoder.model.PolicyAction;
 import sk.automoder.repository.DatasetRepository;
 import sk.automoder.repository.DatasetSampleRepository;
 
@@ -16,7 +19,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Stream;
 
 /**
@@ -156,6 +161,68 @@ public class DatasetService {
     @Transactional(readOnly = true)
     public long sampleCount(Dataset dataset) {
         return sampleRepository.countByDataset(dataset);
+    }
+
+    /** The distinct labels present in the dataset (ground-truth class set), sorted. */
+    @Transactional(readOnly = true)
+    public List<String> distinctLabels(Dataset dataset) {
+        return sampleRepository.findDistinctLabels(dataset);
+    }
+
+    /**
+     * Replaces the dataset's label -&gt; verdict mapping used by the moderation benchmark.
+     * Every label must be one of the dataset's actual labels and every verdict must be
+     * a non-null {@link PolicyAction}.
+     */
+    @Transactional
+    public Dataset setLabelVerdicts(Long id, List<LabelRule> labelVerdicts) {
+        Dataset dataset = getById(id);
+        List<String> known = sampleRepository.findDistinctLabels(dataset);
+        dataset.setLabelVerdicts(validateLabelVerdicts(labelVerdicts, known));
+        return datasetRepository.save(dataset);
+    }
+
+    /**
+     * @return the dataset's labels that have no (or a null) verdict mapping. Empty when
+     *         the mapping is complete. Used to validate a {@code MODERATION} benchmark run.
+     */
+    @Transactional(readOnly = true)
+    public List<String> missingVerdictLabels(Dataset dataset) {
+        Set<String> mapped = new HashSet<>();
+        dataset.verdictMap().forEach((label, verdict) -> {
+            if (verdict != null) {
+                mapped.add(label);
+            }
+        });
+        return sampleRepository.findDistinctLabels(dataset).stream()
+                .filter(label -> !mapped.contains(label))
+                .toList();
+    }
+
+    private List<LabelRule> validateLabelVerdicts(List<LabelRule> rules, List<String> knownLabels) {
+        if (rules == null) {
+            throw new BadRequestException("labelVerdicts is required.");
+        }
+        Set<String> known = new HashSet<>(knownLabels);
+        Set<String> seen = new HashSet<>();
+        List<LabelRule> out = new ArrayList<>(rules.size());
+        for (LabelRule rule : rules) {
+            if (rule == null || rule.label() == null || rule.label().isBlank()
+                    || rule.verdict() == null) {
+                throw new BadRequestException(
+                        "Each label rule must have a non-blank 'label' and a 'verdict' (ALLOW/BLOCK).");
+            }
+            String label = rule.label().trim();
+            if (!known.contains(label)) {
+                throw new BadRequestException("Unknown label '" + label
+                        + "' for this dataset. Valid labels: " + knownLabels + ".");
+            }
+            if (!seen.add(label)) {
+                throw new BadRequestException("Duplicate label: " + label + ".");
+            }
+            out.add(new LabelRule(label, rule.verdict()));
+        }
+        return out;
     }
 
     public Dataset requireDataset(Long id) {

@@ -278,16 +278,13 @@ public class ModerationService {
                 node.path("reason").asText(""));
     }
 
-    /** Parses a model severity string into the enum, defaulting to NONE on unknown values. */
+    /**
+     * Parses a model severity string into the enum, defaulting to NONE on unknown values.
+     * Delegates to {@link SeverityResponseParser} so the moderation endpoint and the
+     * moderation benchmark share the exact same rules.
+     */
     private Severity parseSeverity(String raw) {
-        if (raw == null) {
-            return Severity.NONE;
-        }
-        try {
-            return Severity.valueOf(raw.trim().toUpperCase());
-        } catch (IllegalArgumentException e) {
-            return Severity.NONE;
-        }
+        return SeverityResponseParser.parseSeverity(raw);
     }
 
     private <T> List<List<T>> partition(List<T> list, int size) {

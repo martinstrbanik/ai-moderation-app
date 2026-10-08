@@ -132,9 +132,9 @@ Base package: `sk.automoder` (`backend/src/main/java/sk/automoder/`).
 Key services:
 
 - `AiModelService`, `PolicyService`, `ApiKeyService` — CRUD + validation.
-- `DatasetService` — imports JSONL datasets at startup, read access.
-- `ModerationService` — **batched** text moderation (policy → model → severity → verdict); `ModerationMapping` — pure verdict mapping + grouping/aggregation helpers.
-- `BenchmarkService` — creates runs; `BenchmarkExecutor` — runs them async.
+- `DatasetService` — imports JSONL datasets at startup, read access, and the label→verdict mapping (`setLabelVerdicts`, `distinctLabels`, `missingVerdictLabels`).
+- `ModerationService` — **batched** text moderation (policy → model → severity → verdict); `ModerationMapping` — pure verdict mapping + grouping/aggregation helpers; `SeverityResponseParser` — pure severity-string + severity-response parsing shared by moderation and the benchmark.
+- `BenchmarkService` — creates runs (validates moderation prerequisites); `BenchmarkExecutor` — runs them async (both modes).
 - `Metrics` — pure metric computation (macro precision/recall/F1 + accuracy).
 
 ---
@@ -149,10 +149,10 @@ Entities (all in `model/`):
 | `ApiKey` | tenantId, provider, `encryptedKey` (AES/GCM), label | BYO key; plaintext never returned |
 | `Policy` | tenantId, name, description, categories(`List<Category>` JSON), `thresholdSeverity`(NONE/LOW/MODERATE/HIGH), modelId, fallbackModelId, active, version | `version` increments on update/activation change; `thresholdSeverity` = minimum severity that triggers a `BLOCK` (there is no configurable action); each `Category` is `{id, prompt}` (see below) |
 | `ModerationLog` | tenantId, policy, model, contentType, verdict, `severity`(Severity enum), categories, confidence, latencyMs, `requestId` | audit of each moderation (one row per moderated text); `requestId` groups the rows of one batched request |
-| `Dataset` | name, description, source | reference registry (no tenantId) |
+| `Dataset` | name, description, source, labelVerdicts(`List<LabelRule>` JSON) | reference registry (no tenantId); `labelVerdicts` maps each label to ALLOW/BLOCK for the moderation benchmark (see below) |
 | `DatasetSample` | dataset, content, imageUrl, expectedLabel | one sample; `expectedLabel` used as ground truth |
-| `BenchmarkRun` | tenantId, dataset, policy(nullable), apiKeyId, level, batchSize, status, published, startedAt, finishedAt | one benchmark run |
-| `BenchmarkResult` | tenantId, run, model, precision, recall, f1, accuracy, avgLatency, cost, errorCount, processedSamples | one row per model per run |
+| `BenchmarkRun` | tenantId, dataset, policy(nullable), apiKeyId, `mode`(CLASSIFICATION/MODERATION), level, batchSize, status, published, startedAt, finishedAt | one benchmark run; `mode` selects what is measured |
+| `BenchmarkResult` | tenantId, run, model, precision, recall, f1, accuracy, avgLatency, cost, errorCount, processedSamples, `thresholdMetrics`(JSON) | one row per model per run; `thresholdMetrics` (moderation mode) holds the per-threshold sweep (see §12) |
 
 **Categories (`model.Category`):** a policy's categories are a `List<Category>` where each
 `Category` is `{id, prompt}`. The `prompt` is a **mini-prompt** describing what the category
@@ -163,8 +163,21 @@ typed objects and never parses JSON. The converter also reads the **legacy** bar
 (`["hate_speech"]` → `id = prompt = "hate_speech"`), so pre-existing rows keep working with no
 migration. `PolicyService.validateCategories` rejects blank/duplicate `id`s and blank `prompt`s.
 
+**Label rules (`model.LabelRule`):** a dataset's `labelVerdicts` is a `List<LabelRule>` where each
+`LabelRule` is `{label, verdict}` (`verdict` ∈ `PolicyAction{ALLOW,BLOCK}`). It says which of the
+dataset's own labels mean "should be blocked". Stored as a JSON array in the `dataset.label_verdicts`
+`text` column via `LabelRuleListConverter` (mirrors `CategoryListConverter`), so no migration is
+needed (nullable column). `DatasetService.validateLabelVerdicts` rejects blank/duplicate labels,
+null verdicts and labels that are not actually present in the dataset. Used only by the
+`MODERATION` benchmark mode; `Dataset.verdictMap()` returns the label→verdict lookup.
+
+**Threshold metrics (`model.MetricScores`):** a `BenchmarkResult.thresholdMetrics` is a
+`Map<Severity, MetricScores>` (each `MetricScores` = `{precision, recall, f1, accuracy}`) stored as a
+JSON object in the `benchmark_result.threshold_metrics` `text` column via `ThresholdMetricsConverter`.
+
 Enums: `ModelType{TEXT,VISION}`, `PolicyAction{ALLOW,BLOCK}`,
 `ContentType{TEXT,IMAGE}`, `BenchmarkLevel{DEBUG,EXTRA_LIGHT,LIGHT,FULL}`,
+`BenchmarkMode{CLASSIFICATION,MODERATION}`,
 `RunStatus{PENDING,RUNNING,COMPLETED,FAILED}`, `Severity{NONE,LOW,MODERATE,HIGH,UNKNOWN}`
 (`UNKNOWN` is an app-side sentinel for unclassified texts and is never a valid policy threshold).
 
@@ -248,17 +261,23 @@ Base URL: `http://localhost:8080`.
 | `/api/models` | GET (filters `type`, `enabled`), POST, PUT `/{id}`, DELETE `/{id}`, GET `/{id}` |
 | `/api/api-keys` | GET (masked), POST, DELETE `/{id}` |
 | `/api/policies` | GET (filter `active`), POST, PUT `/{id}`, DELETE `/{id}`, GET `/{id}`, PATCH `/{id}/activate`, PATCH `/{id}/deactivate` |
-| `/api/datasets` | GET, GET `/{id}` |
+| `/api/datasets` | GET, GET `/{id}`, PUT `/{id}/label-verdicts` |
 | `/api/benchmarks/runs` | GET, POST, GET `/{id}`, GET `/{id}/results` |
 | `/api/moderation` | POST |
 | `/actuator/health` | GET (public) |
+
+`GET /api/datasets/{id}` returns the dataset's actual `labels` and its current
+`labelVerdicts` (so a UI can render the ALLOW/BLOCK toggles), e.g.
+`{"id":2,"name":"tuke_slovak","labels":["hate","not_hate"],"labelVerdicts":[],...}`.
 
 Example request bodies:
 
     POST /api/models          {"modelId":"openai/gpt-4o-mini","name":"GPT-4o mini","type":"TEXT","enabled":true}
     POST /api/api-keys        {"label":"my-key","key":"sk-or-v1-..."}
     POST /api/policies        {"name":"Hate","description":"...","categories":[{"id":"hate_speech","prompt":"Content attacking people based on protected attributes."},{"id":"violence","prompt":"Content threatening or glorifying physical violence."}],"thresholdSeverity":"MODERATE","modelId":3,"fallbackModelId":null,"active":true}
-    POST /api/benchmarks/runs {"datasetId":1,"policyId":2,"modelIds":[3,8],"level":"EXTRA_LIGHT","apiKeyId":null,"batchSize":10}
+    PUT  /api/datasets/2/label-verdicts {"labelVerdicts":[{"label":"hate","verdict":"BLOCK"},{"label":"not_hate","verdict":"ALLOW"}]}
+    POST /api/benchmarks/runs {"datasetId":1,"policyId":2,"modelIds":[3,8],"mode":"CLASSIFICATION","level":"EXTRA_LIGHT","apiKeyId":null,"batchSize":10}
+    POST /api/benchmarks/runs {"datasetId":2,"modelIds":[3],"mode":"MODERATION","level":"EXTRA_LIGHT"}   # dataset needs labelVerdicts; no policy used
     POST /api/moderation      {"policyId":2,"batchSize":10,"items":[{"id":"user-comment-1","text":"text to moderate"},{"id":"user-comment-2","text":"another text"}]}
 
 Error shape (`ApiError`): `{timestamp, status, error, message, path, fieldErrors}`.
@@ -359,10 +378,37 @@ Not implemented yet: image/vision moderation (would need a multimodal
 ## 12. Benchmark module
 
 Endpoint: `POST /api/benchmarks/runs` (returns 202, run is executed async) →
-`{datasetId, policyId?, modelIds[], level, apiKeyId?, batchSize?}`.
-`policyId` is **optional** and only stored as metadata (benchmark classifies into
-**dataset labels**, independent of policy rules). `batchSize` overrides the global
-default for that run.
+`{datasetId, policyId?, modelIds[], mode?, level, apiKeyId?, batchSize?}`.
+`mode` is `CLASSIFICATION` (default) or `MODERATION` and selects what the run measures.
+`batchSize` overrides the global default for that run.
+
+- **`CLASSIFICATION`** (default): classifies samples into the dataset's own labels;
+  `policyId` is **optional** and only stored as metadata (independent of policy rules).
+- **`MODERATION`**: runs the moderation pipeline — the model rates each sample's
+  `Severity` against the **dataset's own labels** (severity prompt), the app maps it to an
+  `ALLOW`/`BLOCK` verdict at every threshold, and the verdict is scored against the
+  dataset's **expected verdict** (from its `labelVerdicts` mapping). **No policy is used**:
+  the severity prompt's categories are derived from the dataset itself, so the prompt and
+  the ground truth refer to the same concepts (a policy whose categories differ from the
+  dataset labels would make the run non-evaluable). Requires a complete label→verdict
+  mapping on the dataset, otherwise the request fails fast with `400` (see §6 / §9).
+  `policyId` is ignored for `MODERATION` (it stays optional CLASSIFICATION metadata).
+- **Moderation categories from labels**: only the dataset labels mapped to `BLOCK` become
+  categories (the violation concepts; a text matching none is `NONE`); labels mapped to
+  `ALLOW` are **not** categories. Each label is used as both the category `id` and its
+  mini-prompt (`new Category(label, label)`), in `labelVerdicts` order.
+
+### Threshold sweep (moderation mode)
+
+Because the model outputs only a categorical severity, the verdict for **every**
+threshold can be derived from the same ratings at no extra model cost. The executor
+therefore computes the verdict metrics (`Metrics.compute`, macro P/R/F1 + accuracy over
+`{ALLOW, BLOCK}`) for all four thresholds and stores them in `BenchmarkResult.thresholdMetrics`
+(`{NONE, LOW, MODERATE, HIGH} → {precision, recall, f1, accuracy}`, JSON). A moderation run
+has no single operating point, so it leaves the result's scalar
+`precision/recall/f1/accuracy` columns **null** and exposes the whole sweep instead (the
+sweep *is* the deliverable). The scalar columns remain the classification metrics for
+`CLASSIFICATION` runs.
 
 Execution (`BenchmarkExecutor`, runs on the `benchmarkTaskExecutor` pool):
 
@@ -409,7 +455,19 @@ Timing reference (single vs batch, cheap model): single ≈ 3.8 s/sample;
 
 ## 14. Known decisions & gotchas
 
-- **Policy in benchmark is optional** — reference metadata only (see §12).
+- **A MODERATION benchmark does not use a policy** — its severity prompt's categories and
+  its expected verdicts are both derived from the dataset (`labelVerdicts`), so the prompt
+  and the ground truth refer to the same concepts and runs stay comparable across
+  (irrelevant) policies. `policyId` is optional reference metadata for both modes (see §12).
+- **Moderation benchmark vs. ground truth**: these datasets carry only a categorical
+  label, so the moderation benchmark is scored at the **verdict (ALLOW/BLOCK) level**
+  (there is no per-row ground-truth severity or category), and the expected verdict is
+  derived from the dataset's `labelVerdicts` mapping. Datasets do **not** need per-row
+  probability values. Threshold tuning is done by the sweep, not by ground-truth scores.
+- **New nullable columns** (three added): `dataset.label_verdicts`, `benchmark_run.mode`,
+  `benchmark_result.threshold_metrics` — all nullable `text`/`varchar` so `ddl-auto=update`
+  works on a populated DB. Existing `benchmark_run` rows have `mode = NULL`, which the
+  executor/response treat as `CLASSIFICATION`.
 - **Hibernate `ddl-auto=update` limitation**: adding a `NOT NULL` column to a
   table that already has rows fails. New columns added to existing tables should
   be **nullable** (e.g. `BenchmarkResult.processedSamples` is `Integer`).
@@ -478,7 +536,24 @@ Implemented and verified:
   categories by **1-based number**, which the app maps back to the policy `id`s and filters
   to the input set (invented categories are dropped). `Policy{Request,Response}.categories`
   are arrays of `{id, prompt}`; `PolicyService` validates them (non-blank/unique `id`, non-blank `prompt`).
-- Tests: `mvn test` green (`AutomodApplicationTests`, `MetricsTest`, `ModerationMappingTest`, `ModerationServiceTest`, `CategoryListConverterTest`).
+- **Milestone 8** — moderation benchmark: `Dataset.labelVerdicts` (typed `{label, verdict}`
+  mapping, editable via `PUT /api/datasets/{id}/label-verdicts`, no migration), a
+  `BenchmarkMode{CLASSIFICATION,MODERATION}` on the run, and a `MODERATION` executor path
+  that runs the severity prompt and scores the `ALLOW`/`BLOCK` verdict against the dataset's
+  expected verdict. Includes the **threshold sweep** (`BenchmarkResult.thresholdMetrics`:
+  verdict metrics for every threshold from the same severity ratings, no extra model cost).
+  Severity parsing shared via `SeverityResponseParser`.
+- **Milestone 9** — the `MODERATION` benchmark no longer uses a policy: its severity prompt's
+  categories come from the dataset (the labels mapped to `BLOCK`, via
+  `BenchmarkExecutor.moderationCategories`), and the run reports **only** the threshold sweep —
+  it leaves the scalar `precision/recall/f1/accuracy` columns `null` (no single operating
+  point). The policy is now optional metadata for both modes; `BenchmarkService`
+  `requireModerationPrerequisites` checks only the dataset's label→verdict mapping. No DB
+  migration (nothing added; `benchmark_run.policy_id` was already nullable).
+- Tests: `mvn test` green (`AutomodApplicationTests`, `MetricsTest`, `ModerationMappingTest`,
+  `ModerationServiceTest`, `CategoryListConverterTest`, `LabelRuleListConverterTest`,
+  `ThresholdMetricsConverterTest`, `SeverityResponseParserTest`, `BenchmarkExecutorModerationTest`,
+  `DatasetServiceLabelVerdictsTest`).
 - Postman collection covers all current endpoints.
 
 Known verification notes: model calls were only exercised with a **fake key**
@@ -497,9 +572,14 @@ OpenRouter key.
 3. **Moderation logs read API** — `GET /api/moderation/logs` (filterable).
 4. **Dashboard** — summaries/graphs of moderations + benchmark comparisons.
 5. **Published (pre-prepared) benchmark results** — `published` flag already exists.
-6. **Frontend** — Vue.js 3 web UI for policies/models/benchmark/dashboard.
-7. **Export** — benchmark results to CSV for the thesis.
-8. **Auth/tenancy** — JWT login, real multi-tenant isolation (tenantId already in place).
+6. **Frontend** — Vue.js 3 web UI for policies/models/benchmark/dashboard. In particular a
+   **dataset view** that lists a dataset's `labels` and lets the user toggle each to
+   ALLOW/BLOCK (the `labelVerdicts` mapping) via `PUT /api/datasets/{id}/label-verdicts`.
+7. **Dataset upload UI** — creating a *new* dataset from the FE (today datasets only appear
+   via `DatasetInitializer` scanning `data/processed/`). Separate, larger feature; the
+   label-verdict mapping editor works for already-imported datasets without it.
+8. **Export** — benchmark results to CSV for the thesis (including the threshold sweep).
+9. **Auth/tenancy** — JWT login, real multi-tenant isolation (tenantId already in place).
 
 ---
 
@@ -514,4 +594,4 @@ OpenRouter key.
 
 ---
 
-_Last substantial update: made `BenchmarkLevel` self-describing — each level now carries its `samplesPerClass` (`getSamplesPerClass()`; `DEBUG` = 10/class added, `FULL` = `Integer.MAX_VALUE`), so `BenchmarkExecutor.selectSamples` no longer needs a `switch`. Prior update: removed the unused `Policy.rules` field (never read by moderation/benchmark; it was a placeholder for the planned rules pre-filter) from the entity and the policy DTOs. Prior update: removed the configurable `Policy.action` and the `FLAG` verdict — moderation is fully automatic (`ALLOW`/`BLOCK`, tuned via `thresholdSeverity`); unclassified texts are returned in an `error` list (`verdict = null`). `PolicyAction` is now `{ALLOW, BLOCK}`._
+_Last substantial update: the `MODERATION` benchmark **no longer uses a policy** — its severity prompt's categories are derived from the dataset's `BLOCK` labels (`BenchmarkExecutor.moderationCategories`) and the run reports **only** the threshold sweep (the scalar `precision/recall/f1/accuracy` columns stay `null`, since a moderation run has no single operating point); `BenchmarkService.requireModerationPrerequisites` now checks only the dataset's label→verdict mapping and `policyId` is optional metadata for both modes (no DB migration). Prior update: added the **moderation benchmark** — `Dataset.labelVerdicts` (typed `{label, verdict}` mapping + `LabelRuleListConverter`, editable via `PUT /api/datasets/{id}/label-verdicts`), `BenchmarkMode{CLASSIFICATION,MODERATION}` on the run, a `MODERATION` executor path (severity prompt against the policy → verdict vs. the dataset's expected verdict), and the **threshold sweep** (`BenchmarkResult.thresholdMetrics`, all thresholds from one run at no extra model cost). Shared severity parsing extracted to `SeverityResponseParser`. All new DB columns are nullable (no migration). Prior update: made `BenchmarkLevel` self-describing — each level now carries its `samplesPerClass` (`getSamplesPerClass()`; `DEBUG` = 10/class added, `FULL` = `Integer.MAX_VALUE`), so `BenchmarkExecutor.selectSamples` no longer needs a `switch`. Prior update: removed the unused `Policy.rules` field (never read by moderation/benchmark; it was a placeholder for the planned rules pre-filter) from the entity and the policy DTOs. Prior update: removed the configurable `Policy.action` and the `FLAG` verdict — moderation is fully automatic (`ALLOW`/`BLOCK`, tuned via `thresholdSeverity`); unclassified texts are returned in an `error` list (`verdict = null`). `PolicyAction` is now `{ALLOW, BLOCK}`._
